@@ -20,11 +20,13 @@ interface TerminalHeaderProps {
 }
 
 export function TerminalHeader({ selectedMarket, onOpenSearch, onOpenSettings }: TerminalHeaderProps) {
-  const [currentTime, setCurrentTime] = useState(new Date())
+  const [currentTime, setCurrentTime] = useState<Date | null>(null)
   const [user, setUser] = useState<SupabaseUser | null>(null)
   const supabase = createClient()
 
   useEffect(() => {
+    // Set initial time on client mount to avoid hydration mismatch
+    setCurrentTime(new Date())
     const timer = setInterval(() => setCurrentTime(new Date()), 1000)
     return () => clearInterval(timer)
   }, [])
@@ -44,7 +46,8 @@ export function TerminalHeader({ selectedMarket, onOpenSearch, onOpenSettings }:
     window.location.reload()
   }
 
-  const formatTime = (date: Date, tz: string, label: string) => {
+  const formatTime = (date: Date | null, tz: string, label: string) => {
+    if (!date) return { time: '--:--:--', label }
     const time = date.toLocaleTimeString('en-US', { 
       timeZone: tz, 
       hour: '2-digit', 
