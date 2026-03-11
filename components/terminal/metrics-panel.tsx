@@ -34,10 +34,10 @@ function MetricCard({
       <div className="flex items-center justify-between mb-1">
         <span className="text-[10px] uppercase text-muted-foreground tracking-wider">{label}</span>
         {isLive && (
-          <span className="px-1 py-0.5 text-[8px] bg-bullish/20 text-bullish rounded">LIVE</span>
+          <span className="px-1 py-0.5 text-[8px] bg-bullish/20 text-bullish rounded animate-pulse">LIVE</span>
         )}
       </div>
-      <div className={`text-sm font-semibold ${status ? statusColors[status] : 'text-foreground'}`}>
+      <div className={`text-sm font-semibold transition-all duration-500 ease-out ${status ? statusColors[status] : 'text-foreground'}`}>
         {value}
       </div>
       {subValue && (

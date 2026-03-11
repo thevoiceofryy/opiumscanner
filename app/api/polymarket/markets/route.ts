@@ -33,29 +33,45 @@ export async function GET(request: Request) {
     const markets = await response.json()
     
     // Transform to simpler format
-    const transformed = markets.map((market: any) => ({
-      id: market.id,
-      slug: market.slug,
-      question: market.question,
-      description: market.description,
-      outcomes: market.outcomes || ['Yes', 'No'],
-      outcomePrices: market.outcomePrices ? 
-        (typeof market.outcomePrices === 'string' ? 
-          JSON.parse(market.outcomePrices) : market.outcomePrices) 
-        : null,
-      volume: market.volume,
-      liquidity: market.liquidity,
-      startDate: market.startDate,
-      endDate: market.endDate,
-      image: market.image,
-      icon: market.icon,
-      active: market.active,
-      closed: market.closed,
-      clobTokenIds: market.clobTokenIds ? 
-        (typeof market.clobTokenIds === 'string' ? 
-          JSON.parse(market.clobTokenIds) : market.clobTokenIds) 
-        : null,
-    }))
+    const transformed = markets.map((market: any) => {
+      // Try to extract price beat from various possible sources
+      let priceBeat = market.priceBeat || 
+                     market.referencePrice || 
+                     market.creationPrice ||
+                     market.initialPrice ||
+                     null
+      
+      // If conditions exist, it might contain price information
+      const conditions = market.conditions || []
+      
+      return {
+        id: market.id,
+        slug: market.slug,
+        question: market.question,
+        description: market.description,
+        outcomes: market.outcomes || ['Yes', 'No'],
+        outcomePrices: market.outcomePrices ? 
+          (typeof market.outcomePrices === 'string' ? 
+            JSON.parse(market.outcomePrices) : market.outcomePrices) 
+          : null,
+        volume: market.volume,
+        liquidity: market.liquidity,
+        startDate: market.startDate,
+        endDate: market.endDate,
+        image: market.image,
+        icon: market.icon,
+        active: market.active,
+        closed: market.closed,
+        clobTokenIds: market.clobTokenIds ? 
+          (typeof market.clobTokenIds === 'string' ? 
+            JSON.parse(market.clobTokenIds) : market.clobTokenIds) 
+          : null,
+        conditions,
+        priceBeat,
+        referencePrice: market.referencePrice || null,
+        creationPrice: market.creationPrice || null,
+      }
+    })
 
     return NextResponse.json(transformed)
   } catch (error) {

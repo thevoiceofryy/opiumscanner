@@ -15,6 +15,15 @@ export interface Market {
   active: boolean
   closed: boolean
   clobTokenIds: string[] | null
+  // Price-related fields
+  conditions?: any
+  priceBeat?: number | null
+  referencePrice?: number | null
+  creationPrice?: number | null
+  minBid?: number | null
+  maxAsk?: number | null
+  bestBid?: number | null
+  bestAsk?: number | null
 }
 
 export interface MarketPrice {

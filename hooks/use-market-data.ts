@@ -26,12 +26,20 @@ export function useMarketPrices(tokenId: string | null) {
   )
 }
 
+export function useMarketDetails(marketId: string | null) {
+  return useSWR(
+    marketId ? `/api/polymarket/market-details?id=${marketId}` : null,
+    fetcher,
+    { refreshInterval: 10000 }
+  )
+}
+
 // Crypto hooks
 export function useKlines(symbol: string = 'BTCUSDT', interval: string = '1m', limit: number = 100) {
   return useSWR<Kline[]>(
     `/api/crypto/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
     fetcher,
-    { refreshInterval: 5000 }
+    { refreshInterval: 1000, dedupingInterval: 500 } // 1 second for live feed
   )
 }
 
@@ -39,7 +47,7 @@ export function useIndicators(symbol: string = 'BTCUSDT', interval: string = '1m
   return useSWR<CryptoData>(
     `/api/crypto/indicators?symbol=${symbol}&interval=${interval}`,
     fetcher,
-    { refreshInterval: 5000 }
+    { refreshInterval: 500, dedupingInterval: 250 } // 500ms for live price animation
   )
 }
 
@@ -58,3 +66,4 @@ export function useFunding(symbol: string = 'BTCUSDT') {
     { refreshInterval: 60000 }
   )
 }
+
