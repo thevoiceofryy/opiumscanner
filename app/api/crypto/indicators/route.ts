@@ -1,6 +1,32 @@
 import { NextResponse } from 'next/server'
 
-const BINANCE_API = 'https://api.binance.com/api/v3'
+// Use Binance.US API which works in the US, fallback to global Binance
+const BINANCE_US_API = 'https://api.binance.us/api/v3'
+const BINANCE_GLOBAL_API = 'https://api.binance.com/api/v3'
+
+async function fetchKlinesWithFallback(symbol: string, interval: string, limit: number) {
+  const apis = [BINANCE_US_API, BINANCE_GLOBAL_API]
+  
+  for (const api of apis) {
+    try {
+      const response = await fetch(
+        `${api}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
+        {
+          headers: { 'Accept': 'application/json' },
+          next: { revalidate: 5 }
+        }
+      )
+      
+      if (response.ok) {
+        return await response.json()
+      }
+    } catch {
+      continue
+    }
+  }
+  
+  throw new Error('All Binance APIs unavailable')
+}
 
 // Calculate RSI
 function calculateRSI(closes: number[], period: number = 14): number {
@@ -102,20 +128,8 @@ export async function GET(request: Request) {
   const interval = searchParams.get('interval') || '1m'
 
   try {
-    // Fetch klines for indicator calculation
-    const response = await fetch(
-      `${BINANCE_API}/klines?symbol=${symbol}&interval=${interval}&limit=200`,
-      {
-        headers: { 'Accept': 'application/json' },
-        next: { revalidate: 5 }
-      }
-    )
-
-    if (!response.ok) {
-      throw new Error(`Binance API error: ${response.status}`)
-    }
-
-    const klines = await response.json()
+    // Fetch klines for indicator calculation with fallback
+    const klines = await fetchKlinesWithFallback(symbol, interval, 200)
     
     const opens = klines.map((k: any[]) => parseFloat(k[1]))
     const highs = klines.map((k: any[]) => parseFloat(k[2]))
