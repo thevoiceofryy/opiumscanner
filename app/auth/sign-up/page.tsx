@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { Zap } from 'lucide-react'
 
 export default function Page() {
   const [email, setEmail] = useState('')
@@ -42,7 +43,7 @@ export default function Page() {
         options: {
           emailRedirectTo:
             process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ||
-            `${window.location.origin}/protected`,
+            `${window.location.origin}/`,
         },
       })
       if (error) throw error
@@ -55,13 +56,19 @@ export default function Page() {
   }
 
   return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
+    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10 bg-background">
       <div className="w-full max-w-sm">
         <div className="flex flex-col gap-6">
-          <Card>
+          {/* Branding */}
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <Zap className="w-8 h-8 text-warning" />
+            <span className="text-2xl font-bold">SigmaTerminal</span>
+          </div>
+          
+          <Card className="border-border bg-card">
             <CardHeader>
-              <CardTitle className="text-2xl">Sign up</CardTitle>
-              <CardDescription>Create a new account</CardDescription>
+              <CardTitle className="text-2xl">Create Account</CardTitle>
+              <CardDescription>Get started with your trading terminal</CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSignUp}>
@@ -71,48 +78,52 @@ export default function Page() {
                     <Input
                       id="email"
                       type="email"
-                      placeholder="m@example.com"
+                      placeholder="trader@example.com"
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
+                      className="bg-secondary border-border"
                     />
                   </div>
                   <div className="grid gap-2">
-                    <div className="flex items-center">
-                      <Label htmlFor="password">Password</Label>
-                    </div>
+                    <Label htmlFor="password">Password</Label>
                     <Input
                       id="password"
                       type="password"
                       required
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
+                      className="bg-secondary border-border"
                     />
                   </div>
                   <div className="grid gap-2">
-                    <div className="flex items-center">
-                      <Label htmlFor="repeat-password">Repeat Password</Label>
-                    </div>
+                    <Label htmlFor="repeat-password">Confirm Password</Label>
                     <Input
                       id="repeat-password"
                       type="password"
                       required
                       value={repeatPassword}
                       onChange={(e) => setRepeatPassword(e.target.value)}
+                      className="bg-secondary border-border"
                     />
                   </div>
-                  {error && <p className="text-sm text-red-500">{error}</p>}
+                  {error && <p className="text-sm text-destructive">{error}</p>}
                   <Button type="submit" className="w-full" disabled={isLoading}>
-                    {isLoading ? 'Creating an account...' : 'Sign up'}
+                    {isLoading ? 'Creating account...' : 'Create Account'}
                   </Button>
                 </div>
-                <div className="mt-4 text-center text-sm">
+                <div className="mt-4 text-center text-sm text-muted-foreground">
                   Already have an account?{' '}
                   <Link
                     href="/auth/login"
-                    className="underline underline-offset-4"
+                    className="text-primary underline underline-offset-4 hover:text-primary/80"
                   >
-                    Login
+                    Sign in
+                  </Link>
+                </div>
+                <div className="mt-4 text-center">
+                  <Link href="/" className="text-xs text-muted-foreground hover:text-foreground">
+                    Continue without account
                   </Link>
                 </div>
               </form>

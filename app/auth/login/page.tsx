@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { Zap } from 'lucide-react'
 
 export default function Page() {
   const [email, setEmail] = useState('')
@@ -32,14 +33,9 @@ export default function Page() {
       const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
-        options: {
-          emailRedirectTo:
-            process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ||
-            `${window.location.origin}/protected`,
-        },
       })
       if (error) throw error
-      router.push('/protected')
+      router.push('/')
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : 'An error occurred')
     } finally {
@@ -48,14 +44,20 @@ export default function Page() {
   }
 
   return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
+    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10 bg-background">
       <div className="w-full max-w-sm">
         <div className="flex flex-col gap-6">
-          <Card>
+          {/* Branding */}
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <Zap className="w-8 h-8 text-warning" />
+            <span className="text-2xl font-bold">SigmaTerminal</span>
+          </div>
+          
+          <Card className="border-border bg-card">
             <CardHeader>
-              <CardTitle className="text-2xl">Login</CardTitle>
+              <CardTitle className="text-2xl">Sign In</CardTitle>
               <CardDescription>
-                Enter your email below to login to your account
+                Access your prediction market terminal
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -66,10 +68,11 @@ export default function Page() {
                     <Input
                       id="email"
                       type="email"
-                      placeholder="m@example.com"
+                      placeholder="trader@example.com"
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
+                      className="bg-secondary border-border"
                     />
                   </div>
                   <div className="grid gap-2">
@@ -80,20 +83,26 @@ export default function Page() {
                       required
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
+                      className="bg-secondary border-border"
                     />
                   </div>
-                  {error && <p className="text-sm text-red-500">{error}</p>}
+                  {error && <p className="text-sm text-destructive">{error}</p>}
                   <Button type="submit" className="w-full" disabled={isLoading}>
-                    {isLoading ? 'Logging in...' : 'Login'}
+                    {isLoading ? 'Signing in...' : 'Sign In'}
                   </Button>
                 </div>
-                <div className="mt-4 text-center text-sm">
+                <div className="mt-4 text-center text-sm text-muted-foreground">
                   Don&apos;t have an account?{' '}
                   <Link
                     href="/auth/sign-up"
-                    className="underline underline-offset-4"
+                    className="text-primary underline underline-offset-4 hover:text-primary/80"
                   >
-                    Sign up
+                    Create account
+                  </Link>
+                </div>
+                <div className="mt-4 text-center">
+                  <Link href="/" className="text-xs text-muted-foreground hover:text-foreground">
+                    Continue without account
                   </Link>
                 </div>
               </form>
