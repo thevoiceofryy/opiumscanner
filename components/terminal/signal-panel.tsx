@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { AlertTriangle, CheckCircle, XCircle, ArrowUp, ArrowDown, Minus } from 'lucide-react'
 import type { CryptoData, MarketPrice } from '@/lib/types'
 
@@ -212,18 +212,41 @@ export function SignalPanel({ cryptoData, marketPrices }: SignalPanelProps) {
 }
 
 function EntryCountdown() {
-  // Calculate time until next 15-minute mark
-  const now = new Date()
-  const minutes = now.getMinutes()
-  const seconds = now.getSeconds()
+  const [timeLeft, setTimeLeft] = useState<{ minutes: number; seconds: number } | null>(null)
   
-  const nextMark = Math.ceil((minutes + 1) / 15) * 15
-  const minutesLeft = (nextMark - minutes - 1 + 60) % 60
-  const secondsLeft = 60 - seconds
+  useEffect(() => {
+    const calculateTimeLeft = () => {
+      const now = new Date()
+      const minutes = now.getMinutes()
+      const seconds = now.getSeconds()
+      
+      const nextMark = Math.ceil((minutes + 1) / 15) * 15
+      const minutesLeft = (nextMark - minutes - 1 + 60) % 60
+      const secondsLeft = 60 - seconds
+      
+      setTimeLeft({ minutes: minutesLeft, seconds: secondsLeft === 60 ? 0 : secondsLeft })
+    }
+    
+    // Set initial time on client
+    calculateTimeLeft()
+    
+    // Update every second
+    const timer = setInterval(calculateTimeLeft, 1000)
+    return () => clearInterval(timer)
+  }, [])
+  
+  // Show placeholder during SSR
+  if (!timeLeft) {
+    return (
+      <div className="text-4xl font-bold text-foreground mt-2">
+        --:--
+      </div>
+    )
+  }
   
   return (
     <div className="text-4xl font-bold text-foreground mt-2">
-      {minutesLeft.toString().padStart(2, '0')}:{secondsLeft.toString().padStart(2, '0')}
+      {timeLeft.minutes.toString().padStart(2, '0')}:{timeLeft.seconds.toString().padStart(2, '0')}
     </div>
   )
 }
