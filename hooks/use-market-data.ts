@@ -22,13 +22,17 @@ export function useMarketPrices(tokenId: string | null) {
   return useSWR<MarketPrice>(
     tokenId ? `/api/polymarket/prices?tokenId=${tokenId}` : null,
     fetcher,
-    { refreshInterval: 5000 }
+    {
+      // Faster refresh so the YES/NO edge and signal panel update live
+      refreshInterval: 1000,
+      dedupingInterval: 500,
+    }
   )
 }
 
-export function useMarketDetails(marketId: string | null) {
+export function useMarketDetails(marketSlug: string | null) {
   return useSWR(
-    marketId ? `/api/polymarket/market-details?id=${marketId}` : null,
+    marketSlug ? `/api/polymarket/market-details?slug=${encodeURIComponent(marketSlug)}` : null,
     fetcher,
     { refreshInterval: 10000 }
   )

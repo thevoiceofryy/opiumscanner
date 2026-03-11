@@ -48,8 +48,8 @@ export function TerminalLayout() {
   const { data: fearGreed } = useFearGreed()
   const { data: fundingData } = useFunding(symbol)
   
-  // Fetch market details when a market is selected
-  const { data: marketDetails } = useMarketDetails(selectedMarket?.id || null)
+  // Fetch market details when a market is selected (by slug so we can match Polymarket exactly)
+  const { data: marketDetails } = useMarketDetails(selectedMarket?.slug || null)
 
   // Update price to beat from market details
   useEffect(() => {
