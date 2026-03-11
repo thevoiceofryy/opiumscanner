@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { TerminalHeader } from './terminal-header'
 import { PriceChart } from './price-chart'
 import { IndicatorsPanel } from './indicators-panel'
@@ -10,7 +10,8 @@ import { ContextPanel } from './context-panel'
 import { FlowPanel } from './flow-panel'
 import { PriceTargetPanel } from './price-target-panel'
 import { MarketSearch } from './market-search'
-import { useKlines, useIndicators, useFearGreed, useFunding, useMarketPrices } from '@/hooks/use-market-data'
+import { useKlines, useIndicators, useFearGreed, useFunding, useMarketPrices, useMarketDetails } from '@/hooks/use-market-data'
+import { extractSymbolFromMarket } from '@/lib/utils'
 import type { Market, TimeInterval } from '@/lib/types'
 
 const INTERVALS: { value: TimeInterval; label: string }[] = [
@@ -26,13 +27,37 @@ export function TerminalLayout() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [interval, setInterval] = useState<TimeInterval>('1m')
-  const [symbol] = useState('BTCUSDT')
+  const [symbol, setSymbol] = useState('BTCUSDT')
+  const [priceToBeat, setPriceToBeat] = useState<number | null>(null)
+
+  // Update symbol when market is selected
+  useEffect(() => {
+    if (selectedMarket) {
+      const extractedSymbol = extractSymbolFromMarket(selectedMarket.question)
+      setSymbol(extractedSymbol)
+      // Reset priceToBeat while we load details for the new market
+      setPriceToBeat(null)
+    } else {
+      setPriceToBeat(null)
+    }
+  }, [selectedMarket])
 
   // Data hooks
   const { data: klines } = useKlines(symbol, interval, 100)
   const { data: cryptoData } = useIndicators(symbol, interval)
   const { data: fearGreed } = useFearGreed()
   const { data: fundingData } = useFunding(symbol)
+  
+  // Fetch market details when a market is selected
+  const { data: marketDetails } = useMarketDetails(selectedMarket?.id || null)
+
+  // Update price to beat from market details
+  useEffect(() => {
+    // Use the price to beat from market details (based on Polymarket round start timestamp)
+    if (marketDetails?.priceToBeat !== undefined && marketDetails.priceToBeat !== null) {
+      setPriceToBeat(marketDetails.priceToBeat)
+    }
+  }, [marketDetails])
 
   // Market prices for YES/NO tokens
   const yesTokenId = selectedMarket?.clobTokenIds?.[0] || null
@@ -99,6 +124,8 @@ export function TerminalLayout() {
             <PriceTargetPanel 
               klines={klines || []}
               cryptoData={cryptoData || null}
+              yesPrices={yesPrices || null}
+              priceToBeat={priceToBeat}
             />
           </div>
         </div>
@@ -124,9 +151,9 @@ export function TerminalLayout() {
             </div>
             <div className="flex items-center gap-2 text-xs">
               <span className="text-muted-foreground">ATR</span>
-              <span className="font-mono">${cryptoData?.indicators?.atr?.toFixed(0) || '--'}</span>
+              <span className="font-mono transition-all duration-500">${cryptoData?.indicators?.atr?.toFixed(0) || '--'}</span>
               <span className="text-muted-foreground">RSI</span>
-              <span className={`font-mono ${
+              <span className={`font-mono transition-all duration-500 ${
                 cryptoData?.indicators?.rsi && cryptoData.indicators.rsi > 70 ? 'text-bearish' :
                 cryptoData?.indicators?.rsi && cryptoData.indicators.rsi < 30 ? 'text-bullish' :
                 'text-foreground'
@@ -142,6 +169,9 @@ export function TerminalLayout() {
               data={klines || []}
               symbol={symbol}
               interval={interval}
+              cryptoData={cryptoData || null}
+              selectedMarket={selectedMarket || null}
+              priceToBeat={priceToBeat}
             />
           </div>
 
