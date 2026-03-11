@@ -84,55 +84,6 @@ export function SignalPanel({ cryptoData, marketPrices }: SignalPanelProps) {
     ]
   }, [indicators])
 
-  // Overall directional signal
-  const overallSignal = useMemo(() => {
-    if (confluence.length === 0) {
-      return { direction: 'NEUTRAL' as const, score: 0, bullish: 0, bearish: 0, totalWeight: 0 }
-    }
-
-    let bullishScore = 0
-    let bearishScore = 0
-    let totalWeight = 0
-
-    confluence.forEach((item) => {
-      totalWeight += item.weight
-      if (item.signal === 'bullish') bullishScore += item.weight
-      else if (item.signal === 'bearish') bearishScore += item.weight
-    })
-
-    const netScore = bullishScore - bearishScore
-    const normalizedScore = totalWeight > 0 ? (netScore / totalWeight) * 100 : 0
-
-    return {
-      direction: normalizedScore > 20 ? ('UP' as const) : normalizedScore < -20 ? ('DOWN' as const) : ('NEUTRAL' as const),
-      score: Math.round(normalizedScore),
-      bullish: Math.round((bullishScore / totalWeight) * 100),
-      bearish: Math.round((bearishScore / totalWeight) * 100),
-      totalWeight,
-    }
-  }, [confluence])
-
-  const bullishCount = confluence.filter((c) => c.signal === 'bullish').length
-
-  // Composite signal message + "out-of-zone" logic (OOZ)
-  const preferredSide = overallSignal.direction === 'UP' ? 'YES' : overallSignal.direction === 'DOWN' ? 'NO' : null
-  const preferredPrice = preferredSide === 'YES' ? yesPriceNum : preferredSide === 'NO' ? noPriceNum : 0
-  const inZone = preferredPrice > 0 && preferredPrice >= 0.35 && preferredPrice <= 0.7
-
-  const compositeLabel =
-    overallSignal.direction === 'NEUTRAL'
-      ? 'SIGNAL NEUTRAL'
-      : inZone
-        ? `SIGNAL ${overallSignal.direction} ${preferredSide}`
-        : `SIGNAL ${overallSignal.direction} BUT ${preferredSide} OOZ`
-
-  const compositeSub =
-    overallSignal.direction === 'NEUTRAL'
-      ? 'Mixed signals – wait for a cleaner setup.'
-      : inZone
-        ? `${Math.abs(overallSignal.score)}% confidence from ${confluence.length} indicators.`
-        : `Signal says ${overallSignal.direction} but ${preferredSide || 'side'} is outside 35–70c zone.`
-
   // Simple position size calculator
   const [risk, setRisk] = useState(50)
   const [calcSide, setCalcSide] = useState<'YES' | 'NO'>('YES')
@@ -146,6 +97,82 @@ export function SignalPanel({ cryptoData, marketPrices }: SignalPanelProps) {
     fund: true,
     h4: true,
   })
+
+  // Apply core filters to confluence when computing overall signal
+  const filteredConfluence = useMemo(() => {
+    if (!confluence.length) return []
+
+    return confluence.filter((item) => {
+      if (item.name === 'RSI' || item.name === 'StochRSI') {
+        return coreFilters.ofi
+      }
+      if (item.name === 'MACD' || item.name === 'SMA Cross') {
+        return coreFilters.obi
+      }
+      if (item.name === 'VWAP') {
+        return coreFilters.fund
+      }
+      if (item.name === 'Trend') {
+        return coreFilters.h4
+      }
+      return true
+    })
+  }, [confluence, coreFilters])
+
+  // Overall directional signal (now based on filtered confluence)
+  const overallSignal = useMemo(() => {
+    if (filteredConfluence.length === 0) {
+      return { direction: 'NEUTRAL' as const, score: 0, bullish: 0, bearish: 0, totalWeight: 0 }
+    }
+
+    let bullishScore = 0
+    let bearishScore = 0
+    let totalWeight = 0
+
+    filteredConfluence.forEach((item) => {
+      totalWeight += item.weight
+      if (item.signal === 'bullish') bullishScore += item.weight
+      else if (item.signal === 'bearish') bearishScore += item.weight
+    })
+
+    const netScore = bullishScore - bearishScore
+    const normalizedScore = totalWeight > 0 ? (netScore / totalWeight) * 100 : 0
+
+    return {
+      direction:
+        normalizedScore > 20
+          ? ('UP' as const)
+          : normalizedScore < -20
+          ? ('DOWN' as const)
+          : ('NEUTRAL' as const),
+      score: Math.round(normalizedScore),
+      bullish: Math.round((bullishScore / totalWeight) * 100),
+      bearish: Math.round((bearishScore / totalWeight) * 100),
+      totalWeight,
+    }
+  }, [filteredConfluence])
+
+  const bullishCount = filteredConfluence.filter((c) => c.signal === 'bullish').length
+
+  // Composite signal message + "out-of-zone" logic (OOZ)
+  const preferredSide =
+    overallSignal.direction === 'UP' ? 'YES' : overallSignal.direction === 'DOWN' ? 'NO' : null
+  const preferredPrice = preferredSide === 'YES' ? yesPriceNum : preferredSide === 'NO' ? noPriceNum : 0
+  const inZone = preferredPrice > 0 && preferredPrice >= 0.35 && preferredPrice <= 0.7
+
+  const compositeLabel =
+    overallSignal.direction === 'NEUTRAL'
+      ? 'SIGNAL NEUTRAL'
+      : inZone
+      ? `SIGNAL ${overallSignal.direction} ${preferredSide}`
+      : `SIGNAL ${overallSignal.direction} BUT ${preferredSide} OOZ`
+
+  const compositeSub =
+    overallSignal.direction === 'NEUTRAL'
+      ? 'Mixed signals – wait for a cleaner setup.'
+      : inZone
+      ? `${Math.abs(overallSignal.score)}% confidence from ${filteredConfluence.length} indicators.`
+      : `Signal says ${overallSignal.direction} but ${preferredSide || 'side'} is outside 35–70c zone.`
 
   const activeCoreCount = Object.values(coreFilters).filter(Boolean).length || 1
   const coreScoreScaled = Math.round((overallSignal.score * activeCoreCount) / 4)

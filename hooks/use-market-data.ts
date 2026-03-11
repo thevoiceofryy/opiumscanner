@@ -43,7 +43,10 @@ export function useKlines(symbol: string = 'BTCUSDT', interval: string = '1m', l
   return useSWR<Kline[]>(
     `/api/crypto/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
     fetcher,
-    { refreshInterval: 1000, dedupingInterval: 500 } // 1 second for live feed
+    {
+      refreshInterval: 500,
+      dedupingInterval: 200
+    }
   )
 }
 
@@ -51,7 +54,11 @@ export function useIndicators(symbol: string = 'BTCUSDT', interval: string = '1m
   return useSWR<CryptoData>(
     `/api/crypto/indicators?symbol=${symbol}&interval=${interval}`,
     fetcher,
-    { refreshInterval: 500, dedupingInterval: 250 } // 500ms for live price animation
+    {
+      refreshInterval: 200, // 5 updates per second
+      dedupingInterval: 100,
+      revalidateOnFocus: true
+    }
   )
 }
 
