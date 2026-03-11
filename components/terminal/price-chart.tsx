@@ -1,15 +1,16 @@
 'use client'
 
 import { useMemo, useState, useEffect } from 'react'
-import { 
-  AreaChart, 
+import {
+  ComposedChart,
   Area,
-  XAxis, 
-  YAxis, 
-  Tooltip, 
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
   ResponsiveContainer,
   ReferenceLine,
-  CartesianGrid
+  CartesianGrid,
 } from 'recharts'
 import { extractPriceTargetFromMarket } from '@/lib/utils'
 import type { Kline, CryptoData, Market } from '@/lib/types'
@@ -103,6 +104,7 @@ export function PriceChart({ data, symbol, interval, cryptoData, selectedMarket,
         high: typeof kline.high === 'number' ? kline.high : parseFloat(String(kline.high)),
         low: typeof kline.low === 'number' ? kline.low : parseFloat(String(kline.low)),
         close: closePrice,
+        volume: typeof kline.volume === 'number' ? kline.volume : parseFloat(String(kline.volume)),
       }
     })
   }, [data])
@@ -221,33 +223,55 @@ export function PriceChart({ data, symbol, interval, cryptoData, selectedMarket,
       <div className="flex-1 min-h-0 w-full">
         {chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart
+            <ComposedChart
               data={chartData}
               margin={{ top: 5, right: 30, left: 0, bottom: 20 }}
               syncId="priceChart"
             >
               <defs>
                 <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={isPositive ? "rgb(34, 197, 94)" : "rgb(239, 68, 68)"} stopOpacity={0.8}/>
-                  <stop offset="95%" stopColor={isPositive ? "rgb(34, 197, 94)" : "rgb(239, 68, 68)"} stopOpacity={0}/>
+                  <stop
+                    offset="5%"
+                    stopColor={isPositive ? 'rgb(34, 197, 94)' : 'rgb(239, 68, 68)'}
+                    stopOpacity={0.9}
+                  />
+                  <stop
+                    offset="95%"
+                    stopColor={isPositive ? 'rgb(34, 197, 94)' : 'rgb(239, 68, 68)'}
+                    stopOpacity={0}
+                  />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={true} />
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke="rgba(148, 163, 184, 0.25)"
+                vertical
+              />
               <XAxis 
                 dataKey="time"
                 height={30}
-                tick={{ fontSize: 11, fill: '#ffffff' }}
-                axisLine={{ stroke: 'hsl(var(--border))' }}
+                tick={{ fontSize: 11, fill: 'rgba(148, 163, 184, 0.9)' }}
+                axisLine={{ stroke: 'rgba(148, 163, 184, 0.35)' }}
                 tickLine={false}
                 interval={Math.max(0, Math.floor(chartData.length / 8))}
               />
               <YAxis 
+                yAxisId="price"
                 domain={[Math.floor(priceRange.min), Math.ceil(priceRange.max)]}
                 width={70}
-                tick={{ fontSize: 11, fill: '#ffffff' }}
-                axisLine={{ stroke: 'hsl(var(--border))' }}
+                tick={{ fontSize: 11, fill: 'rgba(148, 163, 184, 0.9)' }}
+                axisLine={{ stroke: 'rgba(148, 163, 184, 0.35)' }}
                 tickLine={false}
                 tickFormatter={(value) => `$${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+              />
+              {/* Hidden volume axis for Binance-style volume bars */}
+              <YAxis
+                yAxisId="volume"
+                orientation="right"
+                axisLine={false}
+                tickLine={false}
+                tick={false}
+                domain={[0, 'auto']}
               />
               <Tooltip
                 contentStyle={{
@@ -265,22 +289,24 @@ export function PriceChart({ data, symbol, interval, cryptoData, selectedMarket,
               />
               {priceToBeat !== null && priceToBeat !== undefined && (
                 <ReferenceLine 
+                  yAxisId="price"
                   y={priceToBeat}
                   stroke="#22c55e"
                   strokeDasharray="5 5"
-                  strokeWidth={3}
+                  strokeWidth={2.5}
                   ifOverflow="extendDomain"
                   label={{
-                    value: `Price to Beat: $${priceToBeat.toFixed(0)}`,
+                    value: `Price to Beat  $${priceToBeat.toFixed(0)}`,
                     position: 'right',
-                     fill: '#ffffff',
-                      fontSize: 13,
-                       fontWeight: 'bold',
-                     offset: 15
-}}
+                    fill: '#e5e7eb',
+                    fontSize: 12,
+                    fontWeight: 'bold',
+                    offset: 15,
+                  }}
                 />
               )}
               <Area
+                yAxisId="price"
                 type="natural"
                 dataKey="price"
                 stroke={isPositive ? 'rgb(34, 197, 94)' : 'rgb(239, 68, 68)'}
@@ -288,9 +314,17 @@ export function PriceChart({ data, symbol, interval, cryptoData, selectedMarket,
                 fillOpacity={1}
                 fill="url(#colorPrice)"
                 isAnimationActive={true}
-                animationDuration={900}
+                animationDuration={600}
               />
-            </AreaChart>
+              {/* Volume bars at the bottom, Binance-style */}
+              <Bar
+                yAxisId="volume"
+                dataKey="volume"
+                barSize={2}
+                fill="rgba(59, 130, 246, 0.5)"
+                radius={[2, 2, 0, 0]}
+              />
+            </ComposedChart>
           </ResponsiveContainer>
         ) : (
           <div className="flex items-center justify-center h-full">
