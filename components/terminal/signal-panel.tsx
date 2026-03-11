@@ -137,6 +137,19 @@ export function SignalPanel({ cryptoData, marketPrices }: SignalPanelProps) {
   const [risk, setRisk] = useState(50)
   const [calcSide, setCalcSide] = useState<'YES' | 'NO'>('YES')
 
+  // Core score filter toggles (OFI / OBI / FUND / 4H).
+  // These are interactive UI chips; for now they scale the displayed
+  // core score but do not change the underlying signal logic.
+  const [coreFilters, setCoreFilters] = useState({
+    ofi: true,
+    obi: true,
+    fund: true,
+    h4: true,
+  })
+
+  const activeCoreCount = Object.values(coreFilters).filter(Boolean).length || 1
+  const coreScoreScaled = Math.round((overallSignal.score * activeCoreCount) / 4)
+
   const calcPrice = calcSide === 'YES' ? yesPriceNum : noPriceNum
   const calcSize = calcPrice > 0 ? risk / calcPrice : 0
 
@@ -248,6 +261,121 @@ export function SignalPanel({ cryptoData, marketPrices }: SignalPanelProps) {
           ))}
         </div>
       </div>
+
+      {/* CORE SCORE + HISTORICAL EDGE (approximate, live) */}
+      {confluence.length > 0 && (
+        <div className="space-y-2">
+          {/* Core score row (clickable chips) */}
+          <div className="p-2 rounded-lg border border-border bg-secondary/40">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                Core Score
+              </span>
+              <div className="flex items-center gap-1">
+                <span
+                  className={`text-xs font-semibold ${
+                    overallSignal.direction === 'UP'
+                      ? 'text-bullish'
+                      : overallSignal.direction === 'DOWN'
+                      ? 'text-bearish'
+                      : 'text-warning'
+                  }`}
+                >
+                  {coreScoreScaled > 0 ? '+' : ''}
+                  {coreScoreScaled} / 100 {overallSignal.direction}
+                </span>
+                <span className="text-[9px] text-muted-foreground">
+                  ({activeCoreCount}/4 on)
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-1 text-[9px] mt-1">
+              <button
+                type="button"
+                className={`px-1.5 py-0.5 rounded border transition-colors cursor-pointer ${
+                  coreFilters.ofi
+                    ? 'bg-secondary/60 border-border shadow-sm'
+                    : 'bg-background border-border/40 text-muted-foreground opacity-40 line-through'
+                }`}
+                onClick={() =>
+                  setCoreFilters((prev) => ({ ...prev, ofi: !prev.ofi }))
+                }
+              >
+                OFI
+              </button>
+              <button
+                type="button"
+                className={`px-1.5 py-0.5 rounded border transition-colors cursor-pointer ${
+                  coreFilters.obi
+                    ? 'bg-secondary/60 border-border shadow-sm'
+                    : 'bg-background border-border/40 text-muted-foreground opacity-40 line-through'
+                }`}
+                onClick={() =>
+                  setCoreFilters((prev) => ({ ...prev, obi: !prev.obi }))
+                }
+              >
+                OBI
+              </button>
+              <button
+                type="button"
+                className={`px-1.5 py-0.5 rounded border transition-colors cursor-pointer ${
+                  coreFilters.fund
+                    ? 'bg-secondary/60 border-border shadow-sm'
+                    : 'bg-background border-border/40 text-muted-foreground opacity-40 line-through'
+                }`}
+                onClick={() =>
+                  setCoreFilters((prev) => ({ ...prev, fund: !prev.fund }))
+                }
+              >
+                FUND
+              </button>
+              <button
+                type="button"
+                className={`px-1.5 py-0.5 rounded border transition-colors cursor-pointer ${
+                  coreFilters.h4
+                    ? 'bg-bullish/20 border-bullish/40 shadow-sm'
+                    : 'bg-background border-border/40 text-muted-foreground opacity-40 line-through'
+                }`}
+                onClick={() =>
+                  setCoreFilters((prev) => ({ ...prev, h4: !prev.h4 }))
+                }
+              >
+                4H {overallSignal.direction === 'UP' ? '✔' : overallSignal.direction === 'DOWN' ? '✕' : '•'}
+              </button>
+            </div>
+          </div>
+
+          {/* Historical edge approximation */}
+          <div className="p-2 rounded-lg border border-border bg-secondary/40">
+            <div className="flex items-center justify-between mb-1 text-[10px]">
+              <span className="uppercase tracking-wider text-muted-foreground">
+                Hist. Edge
+              </span>
+              <span className="text-muted-foreground">
+                {overallSignal.bullish || 0}% UP / {overallSignal.bearish || 0}% DN
+              </span>
+            </div>
+            <div className="flex h-3 rounded-full overflow-hidden mb-1">
+              <div
+                className="bg-bullish flex items-center justify-center text-[9px]"
+                style={{ width: `${overallSignal.bullish || 50}%` }}
+              >
+                {overallSignal.bullish || 0}%
+              </div>
+              <div
+                className="bg-bearish flex items-center justify-center text-[9px]"
+                style={{ width: `${overallSignal.bearish || 50}%` }}
+              >
+                {overallSignal.bearish || 0}%
+              </div>
+            </div>
+            <div className="flex justify-between text-[9px] text-muted-foreground">
+              <span>RSI Mile: {indicators ? Math.round(Math.abs(indicators.rsi - 50)) : '--'}%</span>
+              <span>ATR Mile: {indicators ? Math.round(indicators.atr) : '--'}</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* COMPOSITE SIGNAL CARD */}
       <div className="p-3 rounded-lg border border-border bg-secondary/40">
