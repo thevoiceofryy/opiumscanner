@@ -5,6 +5,9 @@ export function usePolymarketRound() {
   const [marketTitle, setMarketTitle] = useState("Initializing...")
   const [priceToBeat, setPriceToBeat] = useState(0)
   const [probability, setProbability] = useState(50)
+  const [lastResult, setLastResult] = useState<'UP' | 'DOWN' | 'UNKNOWN'>('UNKNOWN')
+  const [upRounds, setUpRounds] = useState(0)
+  const [downRounds, setDownRounds] = useState(0)
 
   useEffect(() => {
     async function fetchRound() {
@@ -12,7 +15,6 @@ export function usePolymarketRound() {
         const res = await fetch('/api/polymarket/round')
         const data = await res.json()
 
-        // Debugging logs - now they will show 0/50 instead of undefined
         console.log("MARKET TITLE FROM API:", data.title)
         console.log("TARGET PRICE FROM API:", data.priceToBeat)
         console.log("PROBABILITY FROM API:", data.probability)
@@ -20,8 +22,48 @@ export function usePolymarketRound() {
         setMarketTitle(data.title || "Searching for BTC Market...")
         setPriceToBeat(data.priceToBeat ?? 0)
         setProbability(data.probability ?? 50)
+
+        if (data.lastRound) {
+          setLastResult(data.lastRound.result || 'UNKNOWN')
+
+          if (typeof window !== 'undefined') {
+            try {
+              const bucketKey = String(data.lastRound.bucket)
+              const lastBucketSeen = window.localStorage.getItem('btcupdown_lastBucket')
+
+              let up = Number(window.localStorage.getItem('btcupdown_up') || '0')
+              let down = Number(window.localStorage.getItem('btcupdown_down') || '0')
+
+              if (bucketKey && bucketKey !== lastBucketSeen && data.lastRound.result !== 'UNKNOWN') {
+                if (data.lastRound.result === 'UP') up += 1
+                if (data.lastRound.result === 'DOWN') down += 1
+
+                window.localStorage.setItem('btcupdown_up', String(up))
+                window.localStorage.setItem('btcupdown_down', String(down))
+                window.localStorage.setItem('btcupdown_lastBucket', bucketKey)
+              }
+
+              setUpRounds(up)
+              setDownRounds(down)
+            } catch {
+              // ignore localStorage issues
+            }
+          }
+        }
       } catch (err) {
         console.error("Hook Fetch Error:", err)
+      }
+    }
+
+    // hydrate initial record from localStorage
+    if (typeof window !== 'undefined') {
+      try {
+        const up = Number(window.localStorage.getItem('btcupdown_up') || '0')
+        const down = Number(window.localStorage.getItem('btcupdown_down') || '0')
+        setUpRounds(up)
+        setDownRounds(down)
+      } catch {
+        // ignore
       }
     }
 
@@ -30,5 +72,5 @@ export function usePolymarketRound() {
     return () => clearInterval(interval)
   }, [])
 
-  return { marketTitle, priceToBeat, probability }
+  return { marketTitle, priceToBeat, probability, lastResult, upRounds, downRounds }
 }

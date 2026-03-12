@@ -51,6 +51,9 @@ export function PriceChart({
       ? cryptoData.price
       : candlePrice
 
+  // Use the live BTC price for the main display; show Polymarket target separately
+  const displayPrice = currentPrice
+
 
   useEffect(() => {
     if (!currentPrice) return
@@ -138,32 +141,23 @@ export function PriceChart({
         </div>
 
         <div className="flex items-center gap-4 font-mono">
+          {/* MAIN DISPLAY PRICE (Polymarket price-to-beat when available) */}
+          <div className="text-2xl font-bold text-red-500">
+            ${displayPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+          </div>
 
-{/* CURRENT BTC PRICE */}
-
-<div className="text-2xl font-bold text-red-500">
-  ${currentPrice.toLocaleString(undefined,{minimumFractionDigits:2})}
-</div>
-
-{/* PRICE TO BEAT */}
-
-{priceToBeat && (
-
-  <div className="flex items-center gap-1 text-orange-400">
-
-    <span className="text-[10px] uppercase text-muted-foreground">
-      TARGET
-    </span>
-
-    <span className="text-sm font-semibold">
-      ${priceToBeat.toLocaleString(undefined,{minimumFractionDigits:2})}
-    </span>
-
-  </div>
-
-)}
-
-</div>
+          {/* PRICE TO BEAT LABEL */}
+          {priceToBeat && (
+            <div className="flex items-center gap-1 text-orange-400">
+              <span className="text-[10px] uppercase text-muted-foreground">
+                TARGET
+              </span>
+              <span className="text-sm font-semibold">
+                ${priceToBeat.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+          )}
+        </div>
 
       </div>
 
@@ -171,61 +165,92 @@ export function PriceChart({
       <div className="flex-1 min-h-0">
 
         <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={chartData} margin={{ top: 10, right: 16, bottom: 16, left: 0 }}>
+            <defs>
+              <linearGradient id="priceGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#ef4444" stopOpacity={0.9} />
+                <stop offset="100%" stopColor="#0b1220" stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="volumeGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.7} />
+                <stop offset="100%" stopColor="#020617" stopOpacity={0} />
+              </linearGradient>
+            </defs>
 
-          <ComposedChart data={chartData}>
+            <CartesianGrid strokeDasharray="2 4" stroke="#1f2937" vertical={false} />
 
-            <CartesianGrid strokeDasharray="3 3" />
-
-            <XAxis dataKey="time" />
+            <XAxis
+              dataKey="time"
+              tick={{ fontSize: 10, fill: '#6b7280' }}
+              tickMargin={8}
+              axisLine={{ stroke: '#1f2937' }}
+              tickLine={false}
+            />
 
             <YAxis
               yAxisId="price"
-              domain={[
-                () => priceRange.min,
-                () => priceRange.max
-              ]}
+              domain={[() => priceRange.min, () => priceRange.max]}
               width={70}
-              tickFormatter={(v)=>`$${v.toLocaleString()}`}
+              tickFormatter={(v) => `$${v.toLocaleString()}`}
+              tick={{ fontSize: 10, fill: '#6b7280' }}
+              axisLine={{ stroke: '#1f2937' }}
+              tickLine={false}
             />
 
-            <YAxis
-              yAxisId="volume"
-              orientation="right"
-              hide
-              domain={[0,'auto']}
+            <YAxis yAxisId="volume" orientation="right" hide domain={[0, 'auto']} />
+
+            <Tooltip
+              contentStyle={{
+                backgroundColor: '#020617',
+                border: '1px solid #1f2937',
+                borderRadius: 6,
+                fontSize: 11,
+              }}
+              labelStyle={{ color: '#9ca3af' }}
+              formatter={(value: any, name: any) => {
+                if (name === 'price') {
+                  return [`$${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 'Price']
+                }
+                if (name === 'volume') {
+                  return [Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 }), 'Volume']
+                }
+                return [value, name]
+              }}
             />
 
-            <Tooltip />
-
-            {priceToBeat && (
-
+            {priceToBeat && priceToBeat > 0 && (
               <ReferenceLine
                 yAxisId="price"
                 y={priceToBeat}
                 stroke="#22c55e"
-                strokeDasharray="5 5"
+                strokeDasharray="4 4"
+                label={{
+                  value: 'TARGET',
+                  position: 'right',
+                  fill: '#22c55e',
+                  fontSize: 10,
+                }}
               />
-
             )}
 
             <Area
               yAxisId="price"
-              type="natural"
+              type="monotone"
               dataKey="price"
               stroke="#ef4444"
-              fillOpacity={0.3}
-              fill="#ef4444"
+              strokeWidth={2}
+              fill="url(#priceGradient)"
+              dot={false}
+              activeDot={{ r: 3, strokeWidth: 0 }}
             />
 
             <Bar
               yAxisId="volume"
               dataKey="volume"
-              fill="rgba(59,130,246,0.5)"
-              barSize={2}
+              fill="url(#volumeGradient)"
+              barSize={3}
             />
-
           </ComposedChart>
-
         </ResponsiveContainer>
 
       </div>

@@ -72,7 +72,7 @@ export function useIndicators(symbol: string = 'BTCUSDT', interval: string = '1m
   return useSWR<CryptoData>(
     `/api/crypto/indicators?symbol=${symbol}&interval=${interval}`,
     fetcher,
-    { refreshInterval: 1, dedupingInterval: 250 } // 500ms for live price animation
+    { refreshInterval: 1000, dedupingInterval: 500 } // ~1s live updates
   )
 }
 

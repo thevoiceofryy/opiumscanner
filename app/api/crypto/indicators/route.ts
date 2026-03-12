@@ -222,44 +222,70 @@ export async function GET(request: Request) {
     const volumes = klines.map((k: any[]) => parseFloat(k[5]))
     
     const currentPrice = closes[closes.length - 1]
-    
-    // 2. DEFINE YOUR TARGET (Matches your Polymarket Hook)
-    const priceToBeat = 70500.50;
 
-    // 3. DYNAMIC CONFIDENCE CALCULATION
-    // This calculates how close the price is to the target.
-    // If price is 70200 and target is 70500, confidence will be lower.
-    // If price passes 70500, confidence moves toward 99%.
-    const diff = currentPrice - priceToBeat;
-    const sensitivity = 0.1; // Increase this to make the % move more aggressively
-    let syncConfidence = Math.floor(50 + (diff * sensitivity));
-    
-    // Keep it between 5% and 99%
-    syncConfidence = Math.max(5, Math.min(99, syncConfidence));
+    // 2. TECHNICAL INDICATORS (real calculations)
+    const rsi = calculateRSI(closes)
+    const { macd, signal: macdSignal, histogram: macdHistogram } = calculateMACD(closes)
+    const atr = calculateATR(highs, lows, closes)
+    const { k: stochK, d: stochD } = calculateStochRSI(closes)
+    const vwap = calculateVWAP(highs, lows, closes, volumes)
+
+    // Simple moving averages
+    const sma = (period: number) => {
+      if (closes.length < period) return currentPrice
+      const slice = closes.slice(-period)
+      return slice.reduce((a, b) => a + b, 0) / slice.length
+    }
+    const sma20 = sma(20)
+    const sma50 = sma(50)
+
+    // Signals
+    const rsiSignal =
+      rsi >= 70 ? 'OVERBOUGHT' : rsi <= 30 ? 'OVERSOLD' : 'NEUTRAL'
+    const stochSignal =
+      stochK >= 80 ? 'OVERBOUGHT' : stochK <= 20 ? 'OVERSOLD' : 'NEUTRAL'
+
+    const macdTrend = macd >= 0 ? 'BULLISH' : 'BEARISH'
+
+    const trend =
+      currentPrice > sma20 && sma20 > sma50
+        ? 'UP'
+        : currentPrice < sma20 && sma20 < sma50
+        ? 'DOWN'
+        : 'NEUTRAL'
+
+    const vwapDeviation = ((currentPrice - vwap) / vwap) * 100
 
     return NextResponse.json({
       symbol,
       interval,
       isMock,
       price: currentPrice,
+      open: closes[0],
       high: Math.max(...highs),
       low: Math.min(...lows),
+      priceChange: currentPrice - closes[0],
       priceChangePercent: ((currentPrice - closes[0]) / closes[0]) * 100,
-      
-      // These keys feed the "Confidence" circle and indicators on your dashboard
-      rsi: syncConfidence, 
-      stochRSI: syncConfidence,
-      confidence: syncConfidence, 
-      
+      volume: volumes.reduce((a, b) => a + b, 0),
+
       indicators: {
-        rsi: syncConfidence,
-        rsiSignal: syncConfidence > 70 ? 'BULLISH' : syncConfidence < 30 ? 'BEARISH' : 'NEUTRAL',
-        macdTrend: currentPrice > priceToBeat ? 'BULLISH' : 'BEARISH',
-        stochK: syncConfidence,
-        stochD: syncConfidence,
-        trend: currentPrice > priceToBeat ? 'UP' : 'DOWN'
+        rsi,
+        rsiSignal,
+        macd,
+        macdSignal,
+        macdHistogram,
+        macdTrend,
+        atr,
+        stochK,
+        stochD,
+        stochSignal,
+        vwap,
+        vwapDeviation,
+        sma20,
+        sma50,
+        trend,
       },
-      priceToBeat: priceToBeat,
+
       timestamp: Date.now()
     })
   } catch (error) {

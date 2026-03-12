@@ -33,7 +33,7 @@ export function TerminalLayout() {
   const btcPrice = useBTCPrice()
   
   // These names MUST match the return statement in your usePolymarketRound hook
-  const { priceToBeat, probability, marketTitle } = usePolymarketRound()
+  const { priceToBeat, probability, marketTitle, lastResult, upRounds, downRounds } = usePolymarketRound()
 
   const [interval, setInterval] = useState<TimeInterval>('15m')
   const symbol = 'BTCUSDT'
@@ -131,18 +131,19 @@ export function TerminalLayout() {
         <div className="col-span-3 bg-card flex flex-col overflow-hidden">
           <div className="flex-1 min-h-0 overflow-y-auto border-b border-border">
           <SignalPanel
-  cryptoData={cryptoData || null}
-  marketPrices={{ 
-    // Use the variable names from line 37 directly
-    yes: probability ?? 0, 
-    no: probability ? (100 - probability) : 0 
-  }}
-  // Pass marketTitle to overwrite the Joe Biden news
-  selectedMarket={marketTitle || "Searching for BTC Market..."}
-  klines={klines || []}
-  priceToBeat={priceToBeat || 0}
-  btcPrice={btcPrice || 0}
-/>
+            cryptoData={cryptoData || null}
+            marketPrices={{
+              yes: probability ?? 0,
+              no: probability !== null && probability !== undefined ? 100 - probability : 0,
+            }}
+            selectedMarket={marketTitle || 'Searching for BTC Market...'}
+            klines={klines || []}
+            priceToBeat={priceToBeat || 0}
+            btcPrice={btcPrice || 0}
+            lastResult={lastResult}
+            upRounds={upRounds}
+            downRounds={downRounds}
+          />
           </div>
           
           <div className="h-72 overflow-y-auto">
