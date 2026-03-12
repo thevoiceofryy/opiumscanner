@@ -1,6 +1,7 @@
 'use client'
 
-import { useMemo, useState, useEffect, useRef } from 'react'
+import { useMemo, useState, useEffect } from 'react'
+
 import {
   ComposedChart,
   Area,
@@ -13,8 +14,6 @@ import {
   CartesianGrid,
 } from 'recharts'
 
-import { extractPriceTargetFromMarket } from '@/lib/utils'
-import { useLiveTicker } from '@/hooks/use-live-ticker'
 import type { Kline, CryptoData, Market } from '@/lib/types'
 
 interface PriceChartProps {
@@ -24,6 +23,7 @@ interface PriceChartProps {
   cryptoData?: CryptoData | null
   selectedMarket?: Market | null
   priceToBeat?: number | null
+  livePrice?: number
 }
 
 export function PriceChart({
@@ -31,144 +31,101 @@ export function PriceChart({
   symbol,
   interval,
   cryptoData,
-  selectedMarket,
   priceToBeat,
+  livePrice
 }: PriceChartProps) {
 
-  const [livePrice, setLivePrice] = useState<number | null>(null)
   const [priceUpdateTime, setPriceUpdateTime] = useState<Date | null>(null)
-  const [priceFlash, setPriceFlash] = useState(false)
-  const [priceDirection, setPriceDirection] = useState<'up' | 'down' | null>(null)
 
-  // Ultra-live price via Binance WebSocket (tick-level)
-  const wsPrice = useLiveTicker(symbol)
+  /*
+  SAFE PRICE ENGINE
+  Prevents $0.00 bug
+  */
 
-  // 🔒 Frozen price to beat (matches Polymarket behaviour)
-  const priceToBeatRef = useRef<number | null>(null)
+  const candlePrice = Number(data[data.length - 1]?.close ?? 0)
 
-  // Capture price-to-beat only once when a market loads
+  const currentPrice =
+    livePrice && livePrice > 1000
+      ? livePrice
+      : cryptoData?.price && cryptoData.price > 1000
+      ? cryptoData.price
+      : candlePrice
+
+
   useEffect(() => {
-    if (!selectedMarket) return
-
-    const extracted = extractPriceTargetFromMarket(selectedMarket.question)
-
-    if (extracted && priceToBeatRef.current === null) {
-      priceToBeatRef.current = extracted
-    }
-
-  }, [selectedMarket])
-
-  // Reset if new market appears
-  useEffect(() => {
-    priceToBeatRef.current = null
-  }, [selectedMarket?.id])
-
-  const frozenPriceToBeat = priceToBeatRef.current ?? priceToBeat
-
-  // Live BTC price: prefer WebSocket, fall back to indicators
-  useEffect(() => {
-    const nextPrice = wsPrice ?? cryptoData?.price
-    if (!nextPrice) return
-
-    setLivePrice(prev => {
-      if (prev && prev !== nextPrice) {
-        setPriceDirection(nextPrice > prev ? 'up' : 'down')
-        setPriceFlash(true)
-        setTimeout(() => setPriceFlash(false), 300)
-        setTimeout(() => setPriceDirection(null), 500)
-      }
-      return nextPrice
-    })
-
+    if (!currentPrice) return
     setPriceUpdateTime(new Date())
-  }, [wsPrice, cryptoData?.price])
+  }, [currentPrice])
 
-  // fallback if cryptoData missing
-  useEffect(() => {
-
-    if (!cryptoData?.price && data?.length) {
-      const latest = Number(data[data.length - 1].close)
-      setLivePrice(latest)
-      setPriceUpdateTime(new Date())
-    }
-
-  }, [data])
 
   const chartData = useMemo(() => {
 
-    if (!data?.length) return []
-  
-    const candles = data.slice(-100).map((kline, idx) => ({
-      idx,
-      time: new Date(kline.openTime).toLocaleTimeString('en-US', {
+    if (!data) return []
+
+    return data.slice(-100).map((k, i) => ({
+      idx: i,
+      time: new Date(k.openTime).toLocaleTimeString('en-US', {
         hour: '2-digit',
         minute: '2-digit',
-        hour12: false,
+        hour12: false
       }),
-      price: Number(kline.close),
-      volume: Number(kline.volume),
+      price: Number(k.close),
+      volume: Number(k.volume)
     }))
-  
-    // inject live price into last candle
-    if (livePrice) {
-      candles[candles.length - 1].price = livePrice
-    }
-  
-    return candles
-  
-  }, [data, livePrice])
-
-  const currentPrice =
-    livePrice ??
-    (data.length ? Number(data[data.length - 1].close) : 0)
-
-  const firstPrice =
-    data.length ? Number(data[0].open) : 0
-
-  const priceChange = currentPrice - firstPrice
-  const priceChangePercent =
-    firstPrice ? (priceChange / firstPrice) * 100 : 0
-
-  const isPositive = priceChange >= 0
-
-  const priceRange = useMemo(() => {
-
-    if (!data.length) return { min: 0, max: 100 }
-
-    const highs = data.map(d => Number(d.high))
-    const lows = data.map(d => Number(d.low))
-
-    const min = Math.min(...lows)
-    const max = Math.max(...highs)
-
-    const padding = (max - min) * 0.1
-
-    return {
-      min: min - padding,
-      max: max + padding,
-    }
 
   }, [data])
 
+
+  const priceRange = useMemo(() => {
+
+    if (!data?.length) return { min: 0, max: 100 }
+
+    const prices = data.flatMap(k => [
+      Number(k.high),
+      Number(k.low)
+    ])
+
+    if (currentPrice) prices.push(currentPrice)
+
+    const min = Math.min(...prices)
+    const max = Math.max(...prices)
+
+    const padding = (max - min) * 0.08
+
+    return {
+      min: min - padding,
+      max: max + padding
+    }
+
+  }, [data, currentPrice])
+
+
   if (!data?.length) {
+
     return (
-      <div className="flex items-center justify-center h-full text-muted-foreground">
-        Loading market data...
+      <div className="w-full h-full flex items-center justify-center bg-card">
+        <span className="text-muted-foreground">
+          Fetching {symbol} data...
+        </span>
       </div>
     )
+
   }
+
 
   return (
 
     <div className="w-full h-full flex flex-col bg-card">
 
-      {/* Header */}
-
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
 
         <div className="flex items-center gap-3">
-          <span className="text-sm font-medium">{symbol}</span>
-          <span className="text-xs bg-secondary px-2 py-1 rounded">
+
+          <span className="text-sm font-medium">
+            {symbol}
+          </span>
+
+          <span className="px-2 py-1 text-xs bg-secondary rounded">
             {interval}
           </span>
 
@@ -177,142 +134,74 @@ export function PriceChart({
               🔴 {priceUpdateTime.toLocaleTimeString()}
             </span>
           )}
-        </div>
 
-        {/* Live price */}
+        </div>
 
         <div className="text-right">
 
-          <div
-            className={`text-2xl font-bold ${
-              priceDirection === 'up'
-                ? 'text-green-500'
-                : priceDirection === 'down'
-                ? 'text-red-500'
-                : isPositive
-                ? 'text-green-500'
-                : 'text-red-500'
-            }`}
-          >
-            ${currentPrice.toLocaleString(undefined, {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}
-          </div>
-
-          <div
-            className={`text-sm ${
-              isPositive ? 'text-green-500' : 'text-red-500'
-            }`}
-          >
-            {isPositive ? '+' : ''}
-            {priceChange.toFixed(2)} ({priceChangePercent.toFixed(2)}%)
+          <div className="text-2xl font-bold text-red-500">
+            ${currentPrice.toLocaleString(undefined,{minimumFractionDigits:2})}
           </div>
 
         </div>
 
-        {/* Price to Beat */}
-
-        {frozenPriceToBeat && (
-          <div className="text-right pl-4 border-l border-border">
-
-            <div className="text-xs text-muted-foreground">
-              Price to Beat
-            </div>
-
-            <div className="text-lg font-bold">
-              ${frozenPriceToBeat.toLocaleString()}
-            </div>
-
-            <div className="text-xs text-muted-foreground">
-              {currentPrice > frozenPriceToBeat ? '+' : '-'}
-              ${Math.abs(currentPrice - frozenPriceToBeat).toFixed(2)}
-            </div>
-
-          </div>
-        )}
-
       </div>
 
-      {/* Chart */}
 
-      <div className="flex-1">
+      <div className="flex-1 min-h-0">
 
         <ResponsiveContainer width="100%" height="100%">
 
           <ComposedChart data={chartData}>
 
-            <defs>
-              <linearGradient id="priceFill" x1="0" y1="0" x2="0" y2="1">
-                <stop
-                  offset="5%"
-                  stopColor={isPositive ? '#22c55e' : '#ef4444'}
-                  stopOpacity={0.8}
-                />
-                <stop
-                  offset="95%"
-                  stopColor={isPositive ? '#22c55e' : '#ef4444'}
-                  stopOpacity={0}
-                />
-              </linearGradient>
-            </defs>
+            <CartesianGrid strokeDasharray="3 3" />
 
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,.2)" />
-
-            <XAxis
-              dataKey="time"
-              tick={{ fontSize: 11 }}
-            />
+            <XAxis dataKey="time" />
 
             <YAxis
               yAxisId="price"
               domain={[
-                Math.floor(priceRange.min),
-                Math.ceil(priceRange.max),
+                () => priceRange.min,
+                () => priceRange.max
               ]}
+              width={70}
+              tickFormatter={(v)=>`$${v.toLocaleString()}`}
             />
 
             <YAxis
               yAxisId="volume"
               orientation="right"
               hide
+              domain={[0,'auto']}
             />
 
             <Tooltip />
 
-            {/* Frozen price-to-beat line */}
+            {priceToBeat && (
 
-            {frozenPriceToBeat && (
               <ReferenceLine
                 yAxisId="price"
-                y={frozenPriceToBeat}
+                y={priceToBeat}
                 stroke="#22c55e"
                 strokeDasharray="5 5"
-                strokeWidth={2}
-                label={{
-                  value: `Price to Beat $${frozenPriceToBeat}`,
-                  position: 'right',
-                  fill: '#e5e7eb',
-                }}
               />
+
             )}
 
             <Area
               yAxisId="price"
               type="natural"
               dataKey="price"
-              stroke={isPositive ? '#22c55e' : '#ef4444'}
-              fill="url(#priceFill)"
-              strokeWidth={2}
+              stroke="#ef4444"
+              fillOpacity={0.3}
+              fill="#ef4444"
             />
-
-            {/* Volume bars */}
 
             <Bar
               yAxisId="volume"
               dataKey="volume"
+              fill="rgba(59,130,246,0.5)"
               barSize={2}
-              fill="rgba(59,130,246,.5)"
             />
 
           </ComposedChart>
@@ -322,5 +211,7 @@ export function PriceChart({
       </div>
 
     </div>
+
   )
+
 }

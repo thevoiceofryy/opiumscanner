@@ -1,89 +1,116 @@
 import { NextResponse } from 'next/server'
 
 // Use Binance.US API which works in the US, fallback to global Binance
-const BINANCE_APIS = [
-  'https://api.binance.us/api/v3',
-  'https://api.binance.com/api/v3',
-  'https://api1.binance.com/api/v3',
-  'https://api2.binance.com/api/v3',
-  'https://api3.binance.com/api/v3',
-  'https://data-api.binance.vision/api/v3'
-]
+const BINANCE_US_API = 'https://api.binance.us/api/v3'
+const BINANCE_GLOBAL_API = 'https://api.binance.com/api/v3'
 
-async function safeFetch(url: string) {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 4000)
-
-  try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      cache: 'no-store',
-      headers: { Accept: 'application/json' }
-    })
-
-    if (!res.ok) throw new Error('API response error')
-
-    return await res.json()
-  } finally {
-    clearTimeout(timeout)
-  }
-}
-
-async function fetchKlinesWithFallback(symbol: string, interval: string, limit: number) {
-
-  const endpoints = [
-    'https://api.binance.us/api/v3',
-    'https://api.binance.com/api/v3',
-    'https://api1.binance.com/api/v3',
-    'https://api2.binance.com/api/v3',
-    'https://api3.binance.com/api/v3',
-    'https://data-api.binance.vision/api/v3'
-  ]
-
-  for (const api of endpoints) {
-    try {
-      const res = await fetch(
-        `${api}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
-        { cache: 'no-store' }
-      )
-
-      if (res.ok) {
-        return await res.json()
-      }
-
-    } catch {
-      continue
-    }
-  }
-
-  throw new Error('All Binance APIs unavailable')
-}
-
-// Fetch the latest ticker price (more real-time than candle closes)
-async function fetchTickerPriceWithFallback(symbol: string): Promise<number> {
+async function fetchKlinesWithFallback(symbol: string, interval: string, limit: number): Promise<{ data: any[], isMock: boolean }> {
   const apis = [BINANCE_US_API, BINANCE_GLOBAL_API]
-
+  
   for (const api of apis) {
     try {
       const response = await fetch(
-        `${api}/ticker/price?symbol=${symbol}`,
+        `${api}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
         {
           headers: { 'Accept': 'application/json' },
-          cache: 'no-store',
+          next: { revalidate: 5 }
         }
       )
-
+      
       if (response.ok) {
-        const data = await response.json()
-        const price = parseFloat(data.price)
-        if (!Number.isNaN(price)) return price
+        return { data: await response.json(), isMock: false }
       }
     } catch {
       continue
     }
   }
+  
+  // Generate mock kline data when APIs are unavailable
+  return { data: generateMockKlines(symbol, limit), isMock: true }
+}
 
-  throw new Error('All Binance ticker APIs unavailable')
+// Seeded random number generator for consistent mock data
+function seededRandom(seed: number): number {
+  const x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453
+  return x - Math.floor(x)
+}
+
+// Generate realistic mock kline data for when APIs are unavailable
+function generateMockKlines(symbol: string, limit: number): any[] {
+  const now = Date.now()
+  const intervalMs = 60000 // 1 minute
+  
+  // Base prices for different symbols
+  const basePrices: { [key: string]: number } = {
+    'BTCUSDT': 70200,
+    'ETHUSDT': 3500,
+    'SOLUSDT': 150,
+    'BNBUSDT': 600,
+  }
+  
+  const basePrice = basePrices[symbol] || 100
+  const volatility = basePrice * 0.003 // 0.3% volatility per candle
+  
+  const klines: any[] = []
+  
+  // Calculate the start of the current minute interval
+  const currentMinute = Math.floor(now / intervalMs) * intervalMs
+  
+  // First, calculate all historical closes using seeded random to get consistent price path
+  const historicalCloses: number[] = []
+  let price = basePrice
+  for (let i = 0; i < limit - 1; i++) {
+    const candleMinute = currentMinute - (limit - 1 - i) * intervalMs
+    const seed = candleMinute / 1000 // Use seconds for seed
+    const rand = seededRandom(seed)
+    const change = (rand - 0.5) * volatility * 2
+    price = price + change
+    historicalCloses.push(price)
+  }
+  
+  // Build klines with consistent historical data
+  for (let i = 0; i < limit; i++) {
+    const candleMinute = currentMinute - (limit - 1 - i) * intervalMs
+    const seed = candleMinute / 1000
+    const isCurrentCandle = i === limit - 1
+    
+    // Get open price (previous close or base price for first candle)
+    const open = i === 0 ? basePrice : historicalCloses[i - 1]
+    
+    // For current candle, use real randomness with time-based variation
+    let close: number
+    if (isCurrentCandle) {
+      // Add sub-second variation for live feel
+      const secondsIntoCandle = (now % intervalMs) / 1000
+      const liveVariation = (Math.sin(now / 500) * 0.5 + Math.random() * 0.5) * volatility
+      close = open + liveVariation * (secondsIntoCandle / 60)
+    } else {
+      close = historicalCloses[i]
+    }
+    
+    // Calculate high/low with seeded random for consistency
+    const rand2 = isCurrentCandle ? Math.random() : seededRandom(seed + 0.1)
+    const rand3 = isCurrentCandle ? Math.random() : seededRandom(seed + 0.2)
+    const rand4 = isCurrentCandle ? Math.random() : seededRandom(seed + 0.3)
+    
+    const high = Math.max(open, close) + rand2 * volatility * 0.5
+    const low = Math.min(open, close) - rand3 * volatility * 0.5
+    const volume = rand4 * 1000 + 100
+    
+    klines.push([
+      candleMinute,
+      open.toFixed(2),
+      high.toFixed(2),
+      low.toFixed(2),
+      close.toFixed(2),
+      volume.toFixed(2),
+      candleMinute + intervalMs - 1,
+      (volume * close).toFixed(2),
+      Math.floor(rand4 * 100),
+    ])
+  }
+  
+  return klines
 }
 
 // Calculate RSI
@@ -187,7 +214,7 @@ export async function GET(request: Request) {
 
   try {
     // Fetch klines for indicator calculation with fallback
-    const klines = await fetchKlinesWithFallback(symbol, interval, 200)
+    const { data: klines, isMock } = await fetchKlinesWithFallback(symbol, interval, 200)
     
     const opens = klines.map((k: any[]) => parseFloat(k[1]))
     const highs = klines.map((k: any[]) => parseFloat(k[2]))
@@ -195,15 +222,7 @@ export async function GET(request: Request) {
     const closes = klines.map((k: any[]) => parseFloat(k[4]))
     const volumes = klines.map((k: any[]) => parseFloat(k[5]))
     
-    // Use live ticker price for the current price so the header moves tick-by-tick,
-    // but still calculate indicators from candle history.
-    let currentPrice: number
-    try {
-      currentPrice = await fetchTickerPriceWithFallback(symbol)
-    } catch {
-      // Fallback to last close if ticker is unavailable
-      currentPrice = closes[closes.length - 1]
-    }
+    const currentPrice = closes[closes.length - 1]
     const openPrice = opens[0]
     const priceChange = currentPrice - openPrice
     const priceChangePercent = (priceChange / openPrice) * 100
@@ -224,6 +243,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       symbol,
       interval,
+      isMock,
       price: currentPrice,
       open: openPrice,
       high: Math.max(...highs),

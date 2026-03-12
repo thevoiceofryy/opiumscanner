@@ -10,7 +10,7 @@ export function useMarkets(query?: string) {
   const params = new URLSearchParams()
   if (query) params.set('q', query)
   params.set('limit', '50')
-  
+
   return useSWR<Market[]>(
     `/api/polymarket/markets?${params}`,
     fetcher,
@@ -22,45 +22,57 @@ export function useMarketPrices(tokenId: string | null) {
   return useSWR<MarketPrice>(
     tokenId ? `/api/polymarket/prices?tokenId=${tokenId}` : null,
     fetcher,
-    {
-      // Faster refresh so the YES/NO edge and signal panel update live
-      refreshInterval: 1000,
-      dedupingInterval: 500,
-    }
+    { refreshInterval: 5000 }
   )
 }
 
-export function useMarketDetails(marketSlug: string | null) {
+export function useMarketDetails(marketId: string | null) {
   return useSWR(
-    marketSlug ? `/api/polymarket/market-details?slug=${encodeURIComponent(marketSlug)}` : null,
+    marketId ? `/api/polymarket/market-details?id=${marketId}` : null,
     fetcher,
     { refreshInterval: 10000 }
   )
 }
 
+export interface MarketHistoryPoint {
+  timestamp: number
+  price: number
+}
+
+export function useMarketHistory(tokenId: string | null, fidelity: number = 60) {
+  return useSWR<{ history: MarketHistoryPoint[]; isMock: boolean }>(
+    tokenId ? `/api/polymarket/history?tokenId=${tokenId}&fidelity=${fidelity}` : null,
+    fetcher,
+    { refreshInterval: 60000 } // 1 minute
+  )
+}
+
 // Crypto hooks
+interface KlinesResponse {
+  data: Kline[]
+  isMock: boolean
+}
+
 export function useKlines(symbol: string = 'BTCUSDT', interval: string = '1m', limit: number = 100) {
-  return useSWR<Kline[]>(
+  const result = useSWR<KlinesResponse>(
     `/api/crypto/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
     fetcher,
-    {
-      refreshInterval: 500,
-      dedupingInterval: 200
-    }
+    { refreshInterval: 1000, dedupingInterval: 500 } // 1 second for live feed
   )
+
+  // Return with backwards-compatible data extraction
+  return {
+    ...result,
+    data: result.data?.data,
+    isMock: result.data?.isMock ?? false
+  }
 }
 
 export function useIndicators(symbol: string = 'BTCUSDT', interval: string = '1m') {
   return useSWR<CryptoData>(
     `/api/crypto/indicators?symbol=${symbol}&interval=${interval}`,
     fetcher,
-    {
-      // Update every 1s with no SWR cooldown so the live
-      // price/count in the header always moves in real time.
-      refreshInterval: 1000,
-      dedupingInterval: 0,
-      revalidateOnFocus: true,
-    }
+    { refreshInterval: 1, dedupingInterval: 250 } // 500ms for live price animation
   )
 }
 
