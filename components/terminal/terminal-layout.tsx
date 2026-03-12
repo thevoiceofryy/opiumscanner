@@ -33,7 +33,7 @@ export function TerminalLayout() {
   const btcPrice = useBTCPrice()
   
   // These names MUST match the return statement in your usePolymarketRound hook
-  const { priceToBeat, probability, marketTitle, lastResult, upRounds, downRounds } = usePolymarketRound()
+  const { priceToBeat, probability, marketTitle, clobAskYes, clobAskNo, lastResult, upRounds, downRounds } = usePolymarketRound()
 
   const [interval, setInterval] = useState<TimeInterval>('15m')
   const symbol = 'BTCUSDT'
@@ -140,6 +140,8 @@ export function TerminalLayout() {
             klines={klines || []}
             priceToBeat={priceToBeat || 0}
             btcPrice={btcPrice || 0}
+            clobAskYes={clobAskYes}
+            clobAskNo={clobAskNo}
             lastResult={lastResult}
             upRounds={upRounds}
             downRounds={downRounds}

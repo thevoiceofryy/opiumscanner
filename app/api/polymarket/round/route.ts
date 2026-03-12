@@ -30,11 +30,46 @@ export async function GET() {
 
     const liveMarket = markets[0];
 
+    // Read CLOB token IDs for Up/Down so we can price using the real orderbook
+    const rawClobTokenIds = liveMarket.clobTokenIds;
+    const clobTokenIds = typeof rawClobTokenIds === 'string'
+      ? JSON.parse(rawClobTokenIds)
+      : rawClobTokenIds;
+
+    const upTokenId = Array.isArray(clobTokenIds) && clobTokenIds.length > 0 ? clobTokenIds[0] : null;
+    const downTokenId = Array.isArray(clobTokenIds) && clobTokenIds.length > 1 ? clobTokenIds[1] : null;
+
+    const fetchBook = async (tokenId: string | null) => {
+      if (!tokenId) return { bestBid: null as number | null, bestAsk: null as number | null, mid: null as number | null };
+      const r = await fetch(`https://clob.polymarket.com/book?token_id=${tokenId}`, {
+        headers: { 'Accept': 'application/json' },
+        cache: 'no-store',
+      });
+      if (!r.ok) return { bestBid: null as number | null, bestAsk: null as number | null, mid: null as number | null };
+      const book = await r.json();
+      const bids = book?.bids || [];
+      const asks = book?.asks || [];
+      const bestBid = bids.length ? parseFloat(bids[0].price) : null;
+      const bestAsk = asks.length ? parseFloat(asks[0].price) : null;
+      const mid = bestBid !== null && bestAsk !== null ? (bestBid + bestAsk) / 2 : (bestBid ?? bestAsk ?? null);
+      return {
+        bestBid: bestBid !== null && !Number.isNaN(bestBid) ? bestBid : null,
+        bestAsk: bestAsk !== null && !Number.isNaN(bestAsk) ? bestAsk : null,
+        mid: mid !== null && !Number.isNaN(mid) ? mid : null,
+      };
+    };
+
+    const [upBook, downBook] = await Promise.all([
+      fetchBook(upTokenId),
+      fetchBook(downTokenId),
+    ]);
+
     // 3. Probability from Polymarket outcome prices (Up is index 0)
     const prices = typeof liveMarket.outcomePrices === 'string'
       ? JSON.parse(liveMarket.outcomePrices)
       : liveMarket.outcomePrices;
 
+    // Display probability directly from outcomePrices so it matches Polymarket UI
     const upProb = prices && prices.length > 0
       ? Math.round(parseFloat(prices[0]) * 100)
       : 0;
@@ -92,6 +127,10 @@ export async function GET() {
       priceToBeat,
       probability: upProb,
       title: liveMarket.question,
+      clob: {
+        up: { tokenId: upTokenId, ...upBook },
+        down: { tokenId: downTokenId, ...downBook },
+      },
       lastRound: {
         bucket: previousBucket,
         result: lastResult,

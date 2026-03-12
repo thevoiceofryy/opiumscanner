@@ -5,6 +5,8 @@ export function usePolymarketRound() {
   const [marketTitle, setMarketTitle] = useState("Initializing...")
   const [priceToBeat, setPriceToBeat] = useState(0)
   const [probability, setProbability] = useState(50)
+  const [clobAskYes, setClobAskYes] = useState<number | null>(null)
+  const [clobAskNo, setClobAskNo] = useState<number | null>(null)
   const [lastResult, setLastResult] = useState<'UP' | 'DOWN' | 'UNKNOWN'>('UNKNOWN')
   const [upRounds, setUpRounds] = useState(0)
   const [downRounds, setDownRounds] = useState(0)
@@ -22,6 +24,8 @@ export function usePolymarketRound() {
         setMarketTitle(data.title || "Searching for BTC Market...")
         setPriceToBeat(data.priceToBeat ?? 0)
         setProbability(data.probability ?? 50)
+        setClobAskYes(typeof data?.clob?.up?.bestAsk === 'number' ? data.clob.up.bestAsk : null)
+        setClobAskNo(typeof data?.clob?.down?.bestAsk === 'number' ? data.clob.down.bestAsk : null)
 
         if (data.lastRound) {
           setLastResult(data.lastRound.result || 'UNKNOWN')
@@ -72,5 +76,5 @@ export function usePolymarketRound() {
     return () => clearInterval(interval)
   }, [])
 
-  return { marketTitle, priceToBeat, probability, lastResult, upRounds, downRounds }
+  return { marketTitle, priceToBeat, probability, clobAskYes, clobAskNo, lastResult, upRounds, downRounds }
 }

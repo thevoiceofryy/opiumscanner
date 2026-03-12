@@ -10,6 +10,8 @@ interface SignalPanelProps {
   klines: any[]
   priceToBeat: number
   btcPrice: number
+  clobAskYes?: number | null
+  clobAskNo?: number | null
   lastResult?: 'UP' | 'DOWN' | 'UNKNOWN'
   upRounds?: number
   downRounds?: number
@@ -20,6 +22,8 @@ export function SignalPanel({
   selectedMarket,
   priceToBeat,
   btcPrice,
+  clobAskYes = null,
+  clobAskNo = null,
   lastResult = 'UNKNOWN',
   upRounds = 0,
   downRounds = 0,
@@ -72,25 +76,61 @@ export function SignalPanel({
   const [risk, setRisk] = useState<string>('50')
   const [side, setSide] = useState<'yes' | 'no'>('yes')
 
-  const priceYes = confidence / 100
-  const priceNo = 1 - priceYes
+  const fallbackYes = confidence / 100
+  const fallbackNo = 1 - fallbackYes
+
+  // Use Polymarket CLOB best ask when available (matches trade panel more closely)
+  const priceYes = typeof clobAskYes === 'number' ? clobAskYes : fallbackYes
+  const priceNo = typeof clobAskNo === 'number' ? clobAskNo : fallbackNo
+
   const activePrice = side === 'yes' ? priceYes : priceNo
 
   const parsedRisk = parseFloat(risk) || 0
   const shares =
     activePrice > 0 ? parsedRisk / activePrice : 0
 
+  // 4. WIN/LOSS ANIMATION when lastResult changes
+  const [flash, setFlash] = useState<'UP' | 'DOWN' | 'NONE'>('NONE')
+
+  useEffect(() => {
+    if (lastResult === 'UP' || lastResult === 'DOWN') {
+      setFlash(lastResult)
+      const id = setTimeout(() => setFlash('NONE'), 1200)
+      return () => clearTimeout(id)
+    }
+  }, [lastResult])
+
   return (
-    <div className="flex flex-col h-full bg-card p-4 space-y-6 overflow-y-auto">
-      <div>
-        <div className="flex items-center gap-2 mb-1">
-          <Target className={`w-3 h-3 ${target > 0 ? 'text-primary animate-pulse' : 'text-muted'}`} />
-          <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-            Active Prediction
-          </h2>
+    <div className="flex flex-col h-full bg-card p-3 space-y-4 overflow-y-auto">
+      {/* Header + compact last-round info */}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Target className={`w-3 h-3 ${target > 0 ? 'text-primary animate-pulse' : 'text-muted'}`} />
+            <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+              Active Prediction
+            </h2>
+          </div>
+          <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
+            <span className="opacity-70">Last:</span>
+            <span
+              className={`px-1.5 py-0.5 rounded ${
+                lastResult === 'UP'
+                  ? 'bg-bullish/20 text-bullish'
+                  : lastResult === 'DOWN'
+                  ? 'bg-bearish/20 text-bearish'
+                  : 'bg-muted/30 text-muted-foreground'
+              }`}
+            >
+              {lastResult === 'UNKNOWN' ? 'PENDING' : lastResult}
+            </span>
+            <span>
+              {upRounds}↑ / {downRounds}↓
+            </span>
+          </div>
         </div>
-        <div className="text-sm font-mono font-bold text-primary leading-tight min-h-[2.5rem]">
-          {selectedMarket || "Scanning Live BTC Markets..."}
+        <div className="text-sm font-mono font-bold text-primary leading-tight line-clamp-2">
+          {selectedMarket || 'Scanning Live BTC Markets...'}
         </div>
       </div>
 
@@ -111,8 +151,29 @@ export function SignalPanel({
         </div>
       </div>
 
+      {/* Live target card removed per design */}
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex flex-col p-3 bg-muted/20 rounded border border-border/40">
+          <span className="text-[9px] text-muted-foreground uppercase font-bold mb-1">YES Probability</span>
+          <span className="text-xl font-mono font-bold text-bullish">{confidence}%</span>
+        </div>
+        <div className="flex flex-col p-3 bg-muted/20 rounded border border-border/40">
+          <span className="text-[9px] text-muted-foreground uppercase font-bold mb-1">NO Probability</span>
+          <span className="text-xl font-mono font-bold text-bearish">{target > 0 ? 100 - confidence : 0}%</span>
+        </div>
+      </div>
+
       {/* ENTRY WINDOW */}
-      <div className="p-3 rounded border border-border/40 bg-muted/10 space-y-2">
+      <div
+        className={`p-3 rounded border border-border/40 bg-muted/10 space-y-2 relative overflow-hidden ${
+          flash === 'UP'
+            ? 'ring-2 ring-bullish/60 animate-pulse'
+            : flash === 'DOWN'
+            ? 'ring-2 ring-bearish/60 animate-pulse'
+            : ''
+        }`}
+      >
         <div className="flex items-center justify-between text-[10px] font-mono">
           <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/40">
             ENTRY WINDOW OPEN
@@ -137,74 +198,19 @@ export function SignalPanel({
         </div>
       </div>
 
-      <div className={`p-3 rounded border transition-all duration-500 ${
-        target === 0 
-          ? 'bg-muted/5 border-muted/20 text-muted-foreground'
-          : 'bg-bullish/5 border-bullish/20 text-bullish'
-      }`}>
-        <div className="flex justify-between items-center mb-2">
-          <div className="flex items-center gap-1.5">
-            <Zap className={`w-3 h-3 ${target > 0 ? 'fill-current' : 'text-muted'}`} />
-            <span className="text-[10px] uppercase font-black tracking-widest">Live Status</span>
-          </div>
-          {target > 0 && <TrendingUp className="w-4 h-4" />}
-        </div>
-        <div className="text-[11px] font-mono leading-relaxed">
-          {target > 0 ? (
-            <>BTC TARGET PRICE <span className="font-bold underline">${targetFormatted}</span></>
-          ) : (
-            <span className="opacity-50 italic animate-pulse">Syncing target price...</span>
-          )}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div className="flex flex-col p-3 bg-muted/20 rounded border border-border/40">
-          <span className="text-[9px] text-muted-foreground uppercase font-bold mb-1">YES Probability</span>
-          <span className="text-xl font-mono font-bold text-bullish">{confidence}%</span>
-        </div>
-        <div className="flex flex-col p-3 bg-muted/20 rounded border border-border/40">
-          <span className="text-[9px] text-muted-foreground uppercase font-bold mb-1">NO Probability</span>
-          <span className="text-xl font-mono font-bold text-bearish">{target > 0 ? 100 - confidence : 0}%</span>
-        </div>
-      </div>
-
-      {/* LAST ROUND & RECORD */}
-      <div className="p-3 rounded border border-border/40 bg-muted/10 space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-bold">
-            Last Round
-          </span>
-          <span
-            className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-              lastResult === 'UP'
-                ? 'bg-bullish/20 text-bullish'
-                : lastResult === 'DOWN'
-                ? 'bg-bearish/20 text-bearish'
-                : 'bg-muted/30 text-muted-foreground'
-            }`}
-          >
-            {lastResult === 'UNKNOWN' ? 'PENDING' : lastResult}
-          </span>
-        </div>
-        <div className="flex items-center justify-between text-[11px] font-mono text-muted-foreground">
-          <span>Rounds</span>
-          <span>
-            {upRounds} UP / {downRounds} DOWN
-          </span>
-        </div>
-      </div>
-
-      {/* CALCULATOR */}
-      <div className="p-3 rounded border border-border/40 bg-muted/10 space-y-3">
-        <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest mb-1">
+      {/* CALCULATOR (compact) */}
+      <div className="p-2 rounded border border-border/40 bg-muted/5 space-y-2">
+        <div className="text-[9px] uppercase font-bold text-muted-foreground tracking-widest mb-1">
           Calculator
         </div>
-        <div className="flex gap-2 text-[11px]">
+        <div className="text-[9px] text-muted-foreground font-mono">
+          Pricing: {typeof clobAskYes === 'number' || typeof clobAskNo === 'number' ? 'CLOB best ask' : 'implied %'}
+        </div>
+        <div className="flex gap-1 text-[10px]">
           <button
             type="button"
             onClick={() => setSide('yes')}
-            className={`flex-1 px-2 py-1 rounded border text-center font-mono ${
+            className={`flex-1 px-2 py-0.5 rounded border text-center font-mono ${
               side === 'yes'
                 ? 'bg-bullish/20 border-bullish text-bullish'
                 : 'border-border/40 text-muted-foreground hover:bg-bullish/5'
@@ -215,7 +221,7 @@ export function SignalPanel({
           <button
             type="button"
             onClick={() => setSide('no')}
-            className={`flex-1 px-2 py-1 rounded border text-center font-mono ${
+            className={`flex-1 px-2 py-0.5 rounded border text-center font-mono ${
               side === 'no'
                 ? 'bg-bearish/20 border-bearish text-bearish'
                 : 'border-border/40 text-muted-foreground hover:bg-bearish/5'
@@ -225,7 +231,7 @@ export function SignalPanel({
           </button>
         </div>
         <div className="space-y-1">
-          <label className="flex items-center justify-between text-[10px] text-muted-foreground uppercase">
+          <label className="flex items-center justify-between text-[9px] text-muted-foreground uppercase">
             <span>Risk ($)</span>
           </label>
           <input
@@ -233,17 +239,17 @@ export function SignalPanel({
             min="0"
             value={risk}
             onChange={(e) => setRisk(e.target.value)}
-            className="w-full px-2 py-1 rounded bg-background border border-border/40 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary"
+            className="w-full px-2 py-0.5 rounded bg-background border border-border/40 text-[10px] font-mono focus:outline-none focus:ring-1 focus:ring-primary"
           />
         </div>
-        <div className="flex items-center justify-between text-[11px] font-mono">
+        <div className="flex items-center justify-between text-[10px] font-mono">
           <span className="text-muted-foreground">Shares</span>
           <span className="font-bold">
             {shares > 0 ? shares.toFixed(1) : '0.0'} {side.toUpperCase()}
           </span>
         </div>
-        <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-          <span>Implied price</span>
+        <div className="flex items-center justify-between text-[9px] text-muted-foreground">
+          <span>Implied</span>
           <span>
             {activePrice > 0 ? (activePrice * 100).toFixed(1) : '0.0'}¢
           </span>
