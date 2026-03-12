@@ -23,7 +23,7 @@ interface PriceChartProps {
   cryptoData?: CryptoData | null
   selectedMarket?: Market | null
   priceToBeat?: number | null
-  livePrice?: number
+  livePrice?: number | null
 }
 
 export function PriceChart({
@@ -137,13 +137,33 @@ export function PriceChart({
 
         </div>
 
-        <div className="text-right">
+        <div className="flex items-center gap-4 font-mono">
 
-          <div className="text-2xl font-bold text-red-500">
-            ${currentPrice.toLocaleString(undefined,{minimumFractionDigits:2})}
-          </div>
+{/* CURRENT BTC PRICE */}
 
-        </div>
+<div className="text-2xl font-bold text-red-500">
+  ${currentPrice.toLocaleString(undefined,{minimumFractionDigits:2})}
+</div>
+
+{/* PRICE TO BEAT */}
+
+{priceToBeat && (
+
+  <div className="flex items-center gap-1 text-orange-400">
+
+    <span className="text-[10px] uppercase text-muted-foreground">
+      TARGET
+    </span>
+
+    <span className="text-sm font-semibold">
+      ${priceToBeat.toLocaleString(undefined,{minimumFractionDigits:2})}
+    </span>
+
+  </div>
+
+)}
+
+</div>
 
       </div>
 

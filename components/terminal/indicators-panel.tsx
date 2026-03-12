@@ -35,10 +35,10 @@ export function IndicatorsPanel({ indicators, klines }: IndicatorsPanelProps) {
       }
     }
 
-    fetchPolymarketNews()
-    const interval = setInterval(fetchPolymarketNews, 10000) // Refresh every 10 seconds for live updates
+    //fetchPolymarketNews()
+    //const interval = setInterval(fetchPolymarketNews, 10000) // Refresh every 10 seconds for live updates
 
-    return () => clearInterval(interval)
+    return () => {}
   }, [])
 
   return (

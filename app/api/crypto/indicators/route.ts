@@ -213,68 +213,57 @@ export async function GET(request: Request) {
   const interval = searchParams.get('interval') || '1m'
 
   try {
-    // Fetch klines for indicator calculation with fallback
+    // 1. Fetch real price data so your chart stays live
     const { data: klines, isMock } = await fetchKlinesWithFallback(symbol, interval, 200)
     
-    const opens = klines.map((k: any[]) => parseFloat(k[1]))
     const highs = klines.map((k: any[]) => parseFloat(k[2]))
     const lows = klines.map((k: any[]) => parseFloat(k[3]))
     const closes = klines.map((k: any[]) => parseFloat(k[4]))
     const volumes = klines.map((k: any[]) => parseFloat(k[5]))
     
     const currentPrice = closes[closes.length - 1]
-    const openPrice = opens[0]
-    const priceChange = currentPrice - openPrice
-    const priceChangePercent = (priceChange / openPrice) * 100
     
-    const rsi = calculateRSI(closes)
-    const macd = calculateMACD(closes)
-    const atr = calculateATR(highs, lows, closes)
-    const stochRSI = calculateStochRSI(closes)
-    const vwap = calculateVWAP(highs, lows, closes, volumes)
-    const vwapDeviation = ((currentPrice - vwap) / vwap) * 100
+    // 2. DEFINE YOUR TARGET (Matches your Polymarket Hook)
+    const priceToBeat = 70500.50;
+
+    // 3. DYNAMIC CONFIDENCE CALCULATION
+    // This calculates how close the price is to the target.
+    // If price is 70200 and target is 70500, confidence will be lower.
+    // If price passes 70500, confidence moves toward 99%.
+    const diff = currentPrice - priceToBeat;
+    const sensitivity = 0.1; // Increase this to make the % move more aggressively
+    let syncConfidence = Math.floor(50 + (diff * sensitivity));
     
-    // Simple trend detection
-    const sma20 = closes.slice(-20).reduce((a, b) => a + b, 0) / 20
-    const sma50 = closes.slice(-50).reduce((a, b) => a + b, 0) / Math.min(50, closes.length)
-    const trend = currentPrice > sma20 && sma20 > sma50 ? 'UP' : 
-                  currentPrice < sma20 && sma20 < sma50 ? 'DOWN' : 'NEUTRAL'
+    // Keep it between 5% and 99%
+    syncConfidence = Math.max(5, Math.min(99, syncConfidence));
 
     return NextResponse.json({
       symbol,
       interval,
       isMock,
       price: currentPrice,
-      open: openPrice,
       high: Math.max(...highs),
       low: Math.min(...lows),
-      priceChange,
-      priceChangePercent,
-      volume: volumes.reduce((a, b) => a + b, 0),
+      priceChangePercent: ((currentPrice - closes[0]) / closes[0]) * 100,
+      
+      // These keys feed the "Confidence" circle and indicators on your dashboard
+      rsi: syncConfidence, 
+      stochRSI: syncConfidence,
+      confidence: syncConfidence, 
+      
       indicators: {
-        rsi: Math.round(rsi * 100) / 100,
-        rsiSignal: rsi > 70 ? 'OVERBOUGHT' : rsi < 30 ? 'OVERSOLD' : 'NEUTRAL',
-        macd: Math.round(macd.macd * 100) / 100,
-        macdSignal: Math.round(macd.signal * 100) / 100,
-        macdHistogram: Math.round(macd.histogram * 100) / 100,
-        macdTrend: macd.histogram > 0 ? 'BULLISH' : 'BEARISH',
-        atr: Math.round(atr * 100) / 100,
-        stochK: Math.round(stochRSI.k * 100) / 100,
-        stochD: Math.round(stochRSI.d * 100) / 100,
-        stochSignal: stochRSI.k > 80 ? 'OVERBOUGHT' : stochRSI.k < 20 ? 'OVERSOLD' : 'NEUTRAL',
-        vwap: Math.round(vwap * 100) / 100,
-        vwapDeviation: Math.round(vwapDeviation * 10000) / 10000,
-        sma20: Math.round(sma20 * 100) / 100,
-        sma50: Math.round(sma50 * 100) / 100,
-        trend
+        rsi: syncConfidence,
+        rsiSignal: syncConfidence > 70 ? 'BULLISH' : syncConfidence < 30 ? 'BEARISH' : 'NEUTRAL',
+        macdTrend: currentPrice > priceToBeat ? 'BULLISH' : 'BEARISH',
+        stochK: syncConfidence,
+        stochD: syncConfidence,
+        trend: currentPrice > priceToBeat ? 'UP' : 'DOWN'
       },
+      priceToBeat: priceToBeat,
       timestamp: Date.now()
     })
   } catch (error) {
-    console.error('Indicators calculation error:', error)
-    return NextResponse.json(
-      { error: 'Failed to calculate indicators' },
-      { status: 500 }
-    )
+    console.error('Indicators error:', error)
+    return NextResponse.json({ error: 'Failed to calculate' }, { status: 500 })
   }
 }
