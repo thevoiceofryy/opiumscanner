@@ -200,8 +200,13 @@ export function SignalPanel({ cryptoData, marketPrices, selectedMarket }: Signal
           />
         </div>
       </div>
-
+      
       {/* Composite Signal */}
+      <div className="mt-2 mb-1">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          Composite Signal
+        </span>
+      </div>
       <div className="p-3 rounded border border-border bg-secondary/30">
         <div className="flex items-center gap-2 mb-2">
           {overallSignal.direction === 'UP' ? (
@@ -260,11 +265,13 @@ function MarketSignalPanel({
   const yesFavored = yesPriceNum > noPriceNum
   const probability = Math.round(yesPriceNum * 100)
   
-  // Format volume
-  const volume = selectedMarket.volume ? 
-    parseFloat(selectedMarket.volume) >= 1000000 ? 
-      `$${(parseFloat(selectedMarket.volume) / 1000000).toFixed(1)}M` :
-      `$${(parseFloat(selectedMarket.volume) / 1000).toFixed(0)}K`
+  // Format volume (selectedMarket.volume is a number in our types)
+  const volume = typeof selectedMarket.volume === 'number'
+    ? selectedMarket.volume >= 1_000_000
+      ? `$${(selectedMarket.volume / 1_000_000).toFixed(1)}M`
+      : selectedMarket.volume >= 1_000
+        ? `$${(selectedMarket.volume / 1_000).toFixed(0)}K`
+        : `$${selectedMarket.volume.toFixed(0)}`
     : '--'
 
   // Format end date

@@ -162,21 +162,24 @@ const sessionLabel: 'LIVE' | 'CLOSED' = 'LIVE'
         </div>
 
         {/* RIGHT PANEL */}
-
         <div className="col-span-3 bg-card flex flex-col overflow-hidden">
-
-          <SignalPanel
-            cryptoData={cryptoData || null}
-            marketPrices={{ yes: null, no: null }}
-            selectedMarket={null}
-          />
-
-          <ContextPanel
-            cryptoData={cryptoData || null}
-            fundingData={fundingData || null}
-            fearGreed={fearGreed || null}
-          />
-
+          {/* Signal block fills most of the column and scrolls if needed */}
+          <div className="flex-1 min-h-0 overflow-y-auto border-b border-border">
+            <SignalPanel
+              cryptoData={cryptoData || null}
+              marketPrices={{ yes: null, no: null }}
+              selectedMarket={null}
+            />
+          </div>
+          
+          {/* Context block sits at the bottom with a fixed height */}
+          <div className="h-72 overflow-y-auto">
+            <ContextPanel
+              cryptoData={cryptoData || null}
+              fundingData={fundingData || null}
+              fearGreed={fearGreed || null}
+            />
+          </div>
         </div>
 
       </div>
