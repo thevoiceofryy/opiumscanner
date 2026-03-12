@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 const GAMMA_API = 'https://gamma-api.polymarket.com'
 
 export async function GET(request: Request) {
+
   const { searchParams } = new URL(request.url)
   const slug = searchParams.get('slug')
   const marketId = searchParams.get('id')
@@ -15,11 +16,16 @@ export async function GET(request: Request) {
   }
 
   try {
+
     let market: any = null
 
-    // Preferred: look up by slug so we match Polymarket's own view exactly.
+    // -----------------------------------
+    // Fetch market
+    // -----------------------------------
+
     if (slug) {
-      const bySlugResponse = await fetch(
+
+      const res = await fetch(
         `${GAMMA_API}/markets?slug=${encodeURIComponent(slug)}`,
         {
           headers: { Accept: 'application/json' },
@@ -27,74 +33,113 @@ export async function GET(request: Request) {
         }
       )
 
-      if (!bySlugResponse.ok) {
-        throw new Error(
-          `Polymarket slug lookup error: ${bySlugResponse.status}`
-        )
+      if (!res.ok) throw new Error(`Gamma error ${res.status}`)
+
+      const results = await res.json()
+
+      if (!Array.isArray(results) || !results.length) {
+        throw new Error(`No market found for slug ${slug}`)
       }
 
-      const slugResults: any[] = await bySlugResponse.json()
-      if (!Array.isArray(slugResults) || slugResults.length === 0) {
-        throw new Error(`No Polymarket markets found for slug ${slug}`)
-      }
+      market = results[0]
 
-      market = slugResults[0]
-    } else if (marketId) {
-      // Fallback: ID lookup if slug isn't provided
-      const response = await fetch(`${GAMMA_API}/markets/${marketId}`, {
+    } else {
+
+      const res = await fetch(`${GAMMA_API}/markets/${marketId}`, {
         headers: { Accept: 'application/json' },
-        next: { revalidate: 5 },
+        next: { revalidate: 5 }
       })
 
-      if (!response.ok) {
-        throw new Error(`Polymarket ID lookup error: ${response.status}`)
-      }
+      if (!res.ok) throw new Error(`Gamma error ${res.status}`)
 
-      market = await response.json()
+      market = await res.json()
+
     }
 
-    // Extract Polymarket's own priceToBeat from eventMetadata
+    /*
+    -------------------------------------
+    Extract tokens
+    -------------------------------------
+    */
+
+    let tokens = market.tokens || []
+    let clobTokenIds = market.clobTokenIds || []
+
+    // fallback through events structure
+    if ((!tokens.length || !clobTokenIds.length) && market.events?.length) {
+
+      const eventMarket = market.events[0]?.markets?.[0]
+
+      tokens = eventMarket?.tokens || tokens
+      clobTokenIds = eventMarket?.clobTokenIds || clobTokenIds
+
+    }
+
+    /*
+    -------------------------------------
+    Normalize tokens
+    -------------------------------------
+    */
+
+    const normalizedTokens = tokens.map((t: any) => ({
+      outcome: t.outcome,
+      token_id: t.token_id || t.tokenId || t.id
+    }))
+
+    /*
+    -------------------------------------
+    Extract priceToBeat
+    -------------------------------------
+    */
+
     let priceToBeat: number | null = null
 
-    // a) Root-level eventMetadata
-    if (
-      market?.eventMetadata &&
-      typeof market.eventMetadata.priceToBeat === 'number'
-    ) {
+    if (market?.eventMetadata?.priceToBeat !== undefined) {
       priceToBeat = market.eventMetadata.priceToBeat
     }
 
-    // b) events[0].eventMetadata.priceToBeat (structure seen in Gamma /markets?slug=...)
     if (
       priceToBeat === null &&
       Array.isArray(market?.events) &&
-      market.events.length > 0
+      market.events.length
     ) {
-      const eventMeta = market.events[0]?.eventMetadata
-      if (eventMeta && typeof eventMeta.priceToBeat === 'number') {
-        priceToBeat = eventMeta.priceToBeat
+      const meta = market.events[0]?.eventMetadata
+      if (meta?.priceToBeat !== undefined) {
+        priceToBeat = meta.priceToBeat
       }
     }
+
+    /*
+    -------------------------------------
+    Return normalized market
+    -------------------------------------
+    */
 
     return NextResponse.json({
       id: market.id,
       slug: market.slug,
       question: market.question,
+
       priceToBeat,
-      startDate: market.startDate,
-      conditions: market.conditions,
-      referencePrice: market.referencePrice,
-      creationPrice: market.creationPrice,
+
+      tokens: normalizedTokens,
+      clobTokenIds,
+
       volume: market.volume,
       liquidity: market.liquidity,
       active: market.active,
       closed: market.closed,
     })
+
   } catch (error) {
+
     console.error('Polymarket market details fetch error:', error)
+
     return NextResponse.json(
       { error: 'Failed to fetch market details' },
       { status: 500 }
     )
+
   }
+
 }

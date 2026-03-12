@@ -1,31 +1,89 @@
 import { NextResponse } from 'next/server'
 
 // Use Binance.US API which works in the US, fallback to global Binance
-const BINANCE_US_API = 'https://api.binance.us/api/v3'
-const BINANCE_GLOBAL_API = 'https://api.binance.com/api/v3'
+const BINANCE_APIS = [
+  'https://api.binance.us/api/v3',
+  'https://api.binance.com/api/v3',
+  'https://api1.binance.com/api/v3',
+  'https://api2.binance.com/api/v3',
+  'https://api3.binance.com/api/v3',
+  'https://data-api.binance.vision/api/v3'
+]
+
+async function safeFetch(url: string) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 4000)
+
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      cache: 'no-store',
+      headers: { Accept: 'application/json' }
+    })
+
+    if (!res.ok) throw new Error('API response error')
+
+    return await res.json()
+  } finally {
+    clearTimeout(timeout)
+  }
+}
 
 async function fetchKlinesWithFallback(symbol: string, interval: string, limit: number) {
+
+  const endpoints = [
+    'https://api.binance.us/api/v3',
+    'https://api.binance.com/api/v3',
+    'https://api1.binance.com/api/v3',
+    'https://api2.binance.com/api/v3',
+    'https://api3.binance.com/api/v3',
+    'https://data-api.binance.vision/api/v3'
+  ]
+
+  for (const api of endpoints) {
+    try {
+      const res = await fetch(
+        `${api}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
+        { cache: 'no-store' }
+      )
+
+      if (res.ok) {
+        return await res.json()
+      }
+
+    } catch {
+      continue
+    }
+  }
+
+  throw new Error('All Binance APIs unavailable')
+}
+
+// Fetch the latest ticker price (more real-time than candle closes)
+async function fetchTickerPriceWithFallback(symbol: string): Promise<number> {
   const apis = [BINANCE_US_API, BINANCE_GLOBAL_API]
-  
+
   for (const api of apis) {
     try {
       const response = await fetch(
-        `${api}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
+        `${api}/ticker/price?symbol=${symbol}`,
         {
           headers: { 'Accept': 'application/json' },
-          next: { revalidate: 5 }
+          cache: 'no-store',
         }
       )
-      
+
       if (response.ok) {
-        return await response.json()
+        const data = await response.json()
+        const price = parseFloat(data.price)
+        if (!Number.isNaN(price)) return price
       }
     } catch {
       continue
     }
   }
-  
-  throw new Error('All Binance APIs unavailable')
+
+  throw new Error('All Binance ticker APIs unavailable')
 }
 
 // Calculate RSI
@@ -137,7 +195,15 @@ export async function GET(request: Request) {
     const closes = klines.map((k: any[]) => parseFloat(k[4]))
     const volumes = klines.map((k: any[]) => parseFloat(k[5]))
     
-    const currentPrice = closes[closes.length - 1]
+    // Use live ticker price for the current price so the header moves tick-by-tick,
+    // but still calculate indicators from candle history.
+    let currentPrice: number
+    try {
+      currentPrice = await fetchTickerPriceWithFallback(symbol)
+    } catch {
+      // Fallback to last close if ticker is unavailable
+      currentPrice = closes[closes.length - 1]
+    }
     const openPrice = opens[0]
     const priceChange = currentPrice - openPrice
     const priceChangePercent = (priceChange / openPrice) * 100

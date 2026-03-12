@@ -55,9 +55,11 @@ export function useIndicators(symbol: string = 'BTCUSDT', interval: string = '1m
     `/api/crypto/indicators?symbol=${symbol}&interval=${interval}`,
     fetcher,
     {
-      refreshInterval: 200, // 5 updates per second
-      dedupingInterval: 100,
-      revalidateOnFocus: true
+      // Update every 1s with no SWR cooldown so the live
+      // price/count in the header always moves in real time.
+      refreshInterval: 1000,
+      dedupingInterval: 0,
+      revalidateOnFocus: true,
     }
   )
 }

@@ -14,6 +14,7 @@ import {
 } from 'recharts'
 
 import { extractPriceTargetFromMarket } from '@/lib/utils'
+import { useLiveTicker } from '@/hooks/use-live-ticker'
 import type { Kline, CryptoData, Market } from '@/lib/types'
 
 interface PriceChartProps {
@@ -39,6 +40,9 @@ export function PriceChart({
   const [priceFlash, setPriceFlash] = useState(false)
   const [priceDirection, setPriceDirection] = useState<'up' | 'down' | null>(null)
 
+  // Ultra-live price via Binance WebSocket (tick-level)
+  const wsPrice = useLiveTicker(symbol)
+
   // 🔒 Frozen price to beat (matches Polymarket behaviour)
   const priceToBeatRef = useRef<number | null>(null)
 
@@ -61,33 +65,23 @@ export function PriceChart({
 
   const frozenPriceToBeat = priceToBeatRef.current ?? priceToBeat
 
-  // Live BTC price
+  // Live BTC price: prefer WebSocket, fall back to indicators
   useEffect(() => {
-    if (!cryptoData?.price) return
+    const nextPrice = wsPrice ?? cryptoData?.price
+    if (!nextPrice) return
 
     setLivePrice(prev => {
-
-      if (prev && prev !== cryptoData.price) {
-
-        if (cryptoData.price > prev) {
-          setPriceDirection('up')
-        } else {
-          setPriceDirection('down')
-        }
-
+      if (prev && prev !== nextPrice) {
+        setPriceDirection(nextPrice > prev ? 'up' : 'down')
         setPriceFlash(true)
         setTimeout(() => setPriceFlash(false), 300)
-
         setTimeout(() => setPriceDirection(null), 500)
-
       }
-
-      return cryptoData.price
+      return nextPrice
     })
 
     setPriceUpdateTime(new Date())
-
-  }, [cryptoData?.price])
+  }, [wsPrice, cryptoData?.price])
 
   // fallback if cryptoData missing
   useEffect(() => {
@@ -103,25 +97,26 @@ export function PriceChart({
   const chartData = useMemo(() => {
 
     if (!data?.length) return []
-
-    return data.slice(-100).map((kline, idx) => {
-
-      const close = Number(kline.close)
-
-      return {
-        idx,
-        time: new Date(kline.openTime).toLocaleTimeString('en-US', {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false,
-        }),
-        price: close,
-        volume: Number(kline.volume),
-      }
-
-    })
-
-  }, [data])
+  
+    const candles = data.slice(-100).map((kline, idx) => ({
+      idx,
+      time: new Date(kline.openTime).toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }),
+      price: Number(kline.close),
+      volume: Number(kline.volume),
+    }))
+  
+    // inject live price into last candle
+    if (livePrice) {
+      candles[candles.length - 1].price = livePrice
+    }
+  
+    return candles
+  
+  }, [data, livePrice])
 
   const currentPrice =
     livePrice ??

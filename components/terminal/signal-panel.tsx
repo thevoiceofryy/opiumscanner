@@ -26,15 +26,16 @@ interface ConfluenceItem {
 export function SignalPanel({ cryptoData, marketPrices }: SignalPanelProps) {
   const indicators = cryptoData?.indicators
 
-  // Calculate YES/NO prices (live from Polymarket)
-  const yesPrice = marketPrices.yes?.midPrice ? (marketPrices.yes.midPrice * 100).toFixed(0) : '--'
-  const noPrice = marketPrices.no?.midPrice ? (marketPrices.no.midPrice * 100).toFixed(0) : '--'
-  const yesPriceNum = marketPrices.yes?.midPrice || 0
-  const noPriceNum = marketPrices.no?.midPrice || 0
+ // Calculate YES/NO prices (live from Polymarket)
+const yesPriceNum = marketPrices.yes?.price ?? null
+const noPriceNum = marketPrices.no?.price ?? null
 
-  // Simple market edge vs 50c fair
-  const yesEdge = yesPriceNum ? ((yesPriceNum - 0.5) * 100).toFixed(0) : '0'
-  const noEdge = noPriceNum ? ((noPriceNum - 0.5) * 100).toFixed(0) : '0'
+const yesPrice = yesPriceNum ? (yesPriceNum * 100).toFixed(0) : '--'
+const noPrice = noPriceNum ? (noPriceNum * 100).toFixed(0) : '--'
+
+// Simple market edge vs 50c fair
+const yesEdge = yesPriceNum ? ((yesPriceNum - 0.5) * 100).toFixed(0) : '0'
+const noEdge = noPriceNum ? ((noPriceNum - 0.5) * 100).toFixed(0) : '0'
 
   // Confluence from multiple indicators (live from Binance)
   const confluence = useMemo((): ConfluenceItem[] => {

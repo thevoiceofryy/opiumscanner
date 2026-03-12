@@ -20,7 +20,6 @@ import {
   useMarketDetails
 } from '@/hooks/use-market-data'
 
-import { extractSymbolFromMarket } from '@/lib/utils'
 import type { Market, TimeInterval } from '@/lib/types'
 
 const INTERVALS: { value: TimeInterval; label: string }[] = [
@@ -35,63 +34,107 @@ export function TerminalLayout() {
 
   const [selectedMarket, setSelectedMarket] = useState<Market | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [interval, setInterval] = useState<TimeInterval>('1m')
   const [symbol, setSymbol] = useState('BTCUSDT')
   const [priceToBeat, setPriceToBeat] = useState<number | null>(null)
 
-  // Update symbol when market changes
+  /*
+  -------------------------------------------------
+  Detect crypto symbol inside market question
+  -------------------------------------------------
+  */
+
   useEffect(() => {
-    if (selectedMarket) {
-      const extracted = extractSymbolFromMarket(selectedMarket.question)
-      setSymbol(extracted)
-      setPriceToBeat(null)
+
+    if (!selectedMarket) return
+
+    const cryptoSymbols = [
+      "BTC","ETH","SOL","DOGE","XRP","ADA","AVAX","BNB"
+    ]
+
+    const words = selectedMarket.question.toUpperCase().split(" ")
+
+    const found = cryptoSymbols.find(sym => words.includes(sym))
+
+    if (found) {
+      setSymbol(found + "USDT")
     }
+
+    setPriceToBeat(null)
+
   }, [selectedMarket])
 
-  // Market data
+  /*
+  -------------------------------------------------
+  Crypto data
+  -------------------------------------------------
+  */
+
   const { data: klines } = useKlines(symbol, interval, 100)
   const { data: cryptoData } = useIndicators(symbol, interval)
   const { data: fearGreed } = useFearGreed()
   const { data: fundingData } = useFunding(symbol)
 
+  /*
+  -------------------------------------------------
+  Market details
+  -------------------------------------------------
+  */
+
   const { data: marketDetails } = useMarketDetails(selectedMarket?.slug || null)
 
-  // Update price to beat
   useEffect(() => {
     if (marketDetails?.priceToBeat !== undefined && marketDetails?.priceToBeat !== null) {
       setPriceToBeat(marketDetails.priceToBeat)
     }
   }, [marketDetails])
 
+ /*
+---------------------------------
+Extract YES / NO token IDs
+---------------------------------
+*/
+
+let yesTokenId: string | null = null
+let noTokenId: string | null = null
+
+if ((marketDetails as any)?.tokens?.length) {
+
+  const yesToken = (marketDetails as any).tokens.find(
+    (t: any) => t.outcome?.toLowerCase() === 'yes'
+  )
+
+  const noToken = (marketDetails as any).tokens.find(
+    (t: any) => t.outcome?.toLowerCase() === 'no'
+  )
+
+  if (yesToken) {
+    yesTokenId = yesToken.token_id
+  }
+
+  if (noToken) {
+    noTokenId = noToken.token_id
+  }
+}
+
+
   /*
-  =========================================================
-  TOKEN EXTRACTION (FIX FOR SIGNAL PANEL)
-  =========================================================
-  Supports both:
-  - tokens[]
-  - clobTokenIds[]
+  -------------------------------------------------
+  Prices
+  -------------------------------------------------
   */
-
-  const yesTokenId =
-    (selectedMarket as any)?.tokens?.find(
-      (t: any) => t.outcome?.toLowerCase() === 'yes'
-    )?.token_id ??
-    selectedMarket?.clobTokenIds?.[0] ??
-    null
-
-  const noTokenId =
-    (selectedMarket as any)?.tokens?.find(
-      (t: any) => t.outcome?.toLowerCase() === 'no'
-    )?.token_id ??
-    selectedMarket?.clobTokenIds?.[1] ??
-    null
 
   const { data: yesPrices } = useMarketPrices(yesTokenId)
   const { data: noPrices } = useMarketPrices(noTokenId)
 
-  // Trading session
+  /*
+  -------------------------------------------------
+  Trading session label
+  -------------------------------------------------
+  */
+
   const sessionLabel = useMemo(() => {
+
     const now = new Date()
 
     const nyHour = parseInt(
@@ -107,7 +150,14 @@ export function TerminalLayout() {
     if (nyHour >= 20 || nyHour < 2) return 'ASIA'
 
     return 'CLOSED'
+
   }, [])
+
+  /*
+  -------------------------------------------------
+  Render
+  -------------------------------------------------
+  */
 
   return (
 
@@ -116,7 +166,7 @@ export function TerminalLayout() {
       <TerminalHeader
         selectedMarket={selectedMarket}
         onOpenSearch={() => setSearchOpen(true)}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => {}}
       />
 
       <div className="flex-1 grid grid-cols-12 gap-px bg-border p-px">
@@ -173,7 +223,7 @@ export function TerminalLayout() {
 
         </div>
 
-        {/* CENTER CHART */}
+        {/* CENTER PANEL */}
 
         <div className="col-span-7 bg-card flex flex-col overflow-hidden">
 
@@ -197,16 +247,33 @@ export function TerminalLayout() {
 
           </div>
 
+          {/* CHART SWITCH */}
+
           <div className="flex-1">
 
-            <PriceChart
-              data={klines || []}
-              symbol={symbol}
-              interval={interval}
-              cryptoData={cryptoData || null}
-              selectedMarket={selectedMarket}
-              priceToBeat={priceToBeat}
-            />
+          {selectedMarket ? (
+
+<PriceChart
+data={klines || []}
+symbol={selectedMarket.question}
+interval={interval}
+cryptoData={cryptoData || null}
+selectedMarket={selectedMarket}
+priceToBeat={priceToBeat}
+/>
+
+) : (
+
+              <PriceChart
+                data={klines || []}
+                symbol={symbol}
+                interval={interval}
+                cryptoData={cryptoData || null}
+                selectedMarket={null}
+                priceToBeat={null}
+              />
+
+            )}
 
           </div>
 
@@ -232,8 +299,8 @@ export function TerminalLayout() {
                 <div className="flex gap-2">
                   <span className="text-muted-foreground">YES</span>
                   <span className="text-bullish font-semibold">
-                    {yesPrices?.midPrice
-                      ? `${(yesPrices.midPrice * 100).toFixed(0)}c`
+                    {(yesPrices as any)?.price
+                      ? `${((yesPrices as any).price * 100).toFixed(0)}c`
                       : '--'}
                   </span>
                 </div>
@@ -241,8 +308,8 @@ export function TerminalLayout() {
                 <div className="flex gap-2">
                   <span className="text-muted-foreground">NO</span>
                   <span className="text-bearish font-semibold">
-                    {noPrices?.midPrice
-                      ? `${(noPrices.midPrice * 100).toFixed(0)}c`
+                    {(noPrices as any)?.price
+                      ? `${((noPrices as any).price * 100).toFixed(0)}c`
                       : '--'}
                   </span>
                 </div>
@@ -295,4 +362,4 @@ export function TerminalLayout() {
     </div>
 
   )
-}11
+}
