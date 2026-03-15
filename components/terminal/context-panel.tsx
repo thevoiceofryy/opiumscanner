@@ -1,165 +1,114 @@
 'use client'
 
-import { TrendingUp, TrendingDown, Wallet, BarChart3, Activity, DollarSign } from 'lucide-react'
-import type { CryptoData, FundingData, FearGreed } from '@/lib/types'
+import { useEffect, useState, useRef } from 'react'
+import { ExternalLink, Newspaper, RefreshCw } from 'lucide-react'
 
-interface ContextPanelProps {
-  cryptoData: CryptoData | null
-  fundingData: FundingData | null
-  fearGreed: FearGreed | null
+interface NewsItem {
+  id: number
+  title: string
+  url: string
+  source: { title: string }
+  published_at: string
+  votes: { positive: number; negative: number }
 }
 
-function ContextCard({ 
-  icon: Icon,
-  label, 
-  value, 
-  subLabel,
-  status,
-  isLive = false 
-}: { 
-  icon: any
-  label: string
-  value: string | React.ReactNode
-  subLabel?: string
-  status?: 'bullish' | 'bearish' | 'neutral' | 'warning'
-  isLive?: boolean
-}) {
-  const statusColors = {
-    bullish: 'border-bullish/30 bg-bullish/5',
-    bearish: 'border-bearish/30 bg-bearish/5',
-    neutral: 'border-border bg-secondary/30',
-    warning: 'border-warning/30 bg-warning/5'
+export function ContextPanel() {
+  const [news, setNews] = useState<NewsItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const initialLoadDone = useRef(false)
+
+  const fetchNews = async () => {
+    if (!initialLoadDone.current) setLoading(true)
+    try {
+      const res = await fetch('/api/polymarket/news')
+      const data = await res.json()
+      if (data?.items?.length) {
+        setNews(data.items)
+        setLastUpdated(new Date())
+      }
+    } catch (e) {
+      console.error('News fetch failed:', e)
+    } finally {
+      setLoading(false)
+      initialLoadDone.current = true
+    }
   }
 
-  const textColors = {
-    bullish: 'text-bullish',
-    bearish: 'text-bearish',
-    neutral: 'text-foreground',
-    warning: 'text-warning'
+  useEffect(() => {
+    fetchNews()
+    const id = setInterval(fetchNews, 3 * 60 * 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  const timeAgo = (dateStr: string) => {
+    if (!dateStr) return ''
+    const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000)
+    if (isNaN(diff) || diff < 0) return ''
+    if (diff < 60) return `${diff}s ago`
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+    return `${Math.floor(diff / 86400)}d ago`
   }
 
   return (
-    <div className={`p-2 rounded border ${status ? statusColors[status] : statusColors.neutral}`}>
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-1.5">
-          <Icon className="w-3 h-3 text-muted-foreground" />
-          <span className="text-[10px] uppercase text-muted-foreground tracking-wider">{label}</span>
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Header */}
+      <div className="px-3 py-2 border-b border-border flex items-center justify-between flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <Newspaper className="w-3.5 h-3.5 text-muted-foreground" />
+          <span className="text-xs font-medium uppercase tracking-wider">BTC News</span>
         </div>
-        {isLive && (
-          <span className="px-1 py-0.5 text-[8px] bg-bullish/20 text-bullish rounded">LIVE</span>
+        <div className="flex items-center gap-2">
+          {lastUpdated && (
+            <span className="text-[9px] text-muted-foreground font-mono">
+              {lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
+          <button
+            onClick={() => { setLoading(true); fetchNews() }}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="Refresh news"
+          >
+            <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+      </div>
+
+      {/* News list */}
+      <div className="flex-1 overflow-y-auto">
+        {loading && news.length === 0 && (
+          <div className="flex flex-col gap-2 p-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-14 rounded bg-muted/30 animate-pulse" />
+            ))}
+          </div>
         )}
-      </div>
-      <div className={`text-sm font-semibold ${status ? textColors[status] : textColors.neutral}`}>
-        {value}
-      </div>
-      {subLabel && (
-        <div className="text-[10px] text-muted-foreground">{subLabel}</div>
-      )}
-    </div>
-  )
-}
-
-export function ContextPanel({ cryptoData, fundingData, fearGreed }: ContextPanelProps) {
-  const indicators = cryptoData?.indicators
-
-  // Determine 4H trend based on current data (simplified)
-  const trend4h = indicators?.trend || 'NEUTRAL'
-  
-  // Support level calculation (simplified - using recent low)
-  const supportLevel = cryptoData?.low 
-    ? `$${cryptoData.low.toLocaleString()}`
-    : '--'
-  const supportDistance = cryptoData?.price && cryptoData?.low
-    ? ((cryptoData.price - cryptoData.low) / cryptoData.price * 100).toFixed(1)
-    : '--'
-
-  // Basis calculation (spot vs futures spread approximation)
-  const basis = fundingData?.fundingRate 
-    ? (fundingData.fundingRate * 8).toFixed(2) // Approximate annualized
-    : '--'
-
-  return (
-    <div className="p-2">
-      <div className="flex items-center gap-2 mb-3 px-1">
-        <BarChart3 className="w-4 h-4 text-info" />
-        <span className="text-xs font-medium uppercase tracking-wider">Context</span>
-      </div>
-      
-      <div className="grid grid-cols-2 gap-2">
-        <ContextCard
-          icon={TrendingUp}
-          label="4H Macro"
-          value={
-            <div className="flex items-center gap-1">
-              {trend4h === 'UP' ? (
-                <TrendingUp className="w-3 h-3" />
-              ) : trend4h === 'DOWN' ? (
-                <TrendingDown className="w-3 h-3" />
-              ) : null}
-              <span>{trend4h}</span>
+        {!loading && news.length === 0 && (
+          <div className="flex items-center justify-center h-20 text-muted-foreground text-xs">
+            No news available
+          </div>
+        )}
+        {news.map((item) => (
+          <a key={item.id} href={item.url} target="_blank" rel="noopener noreferrer"
+            className="flex flex-col gap-0.5 px-3 py-2 border-b border-border/30 hover:bg-muted/10 transition-colors group">
+            <div className="flex items-start justify-between gap-2">
+              <span className="text-[11px] font-medium leading-tight text-foreground group-hover:text-primary transition-colors line-clamp-2">
+                {item.title}
+              </span>
+              <ExternalLink className="w-2.5 h-2.5 text-muted-foreground flex-shrink-0 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity" />
             </div>
-          }
-          subLabel="4-hour BTC trend"
-          status={trend4h === 'UP' ? 'bullish' : trend4h === 'DOWN' ? 'bearish' : 'neutral'}
-          isLive
-        />
-        
-        <ContextCard
-          icon={Activity}
-          label="Fear & Greed"
-          value={
-            <span>{fearGreed?.value || '--'} {fearGreed?.classification?.split(' ')[0] || ''}</span>
-          }
-          subLabel={fearGreed?.classification || 'Loading...'}
-          status={
-            fearGreed?.value && fearGreed.value <= 25 ? 'bearish' :
-            fearGreed?.value && fearGreed.value >= 75 ? 'bullish' :
-            fearGreed?.value && fearGreed.value < 45 ? 'warning' : 'neutral'
-          }
-          isLive
-        />
-        
-        <ContextCard
-          icon={DollarSign}
-          label="Funding Rate"
-          value={`${fundingData?.fundingRateBps?.toFixed(2) || '--'} bps`}
-          subLabel={fundingData?.sentiment === 'NEUTRAL' ? 'Normal funding rate' : `${fundingData?.sentiment} funding`}
-          status={fundingData?.sentiment === 'BULLISH' ? 'bullish' : fundingData?.sentiment === 'BEARISH' ? 'bearish' : 'neutral'}
-          isLive
-        />
-        
-        <ContextCard
-          icon={BarChart3}
-          label="Top Traders"
-          value={`${fundingData?.longPercent || '--'}% Long`}
-          subLabel={
-            fundingData?.longPercent && fundingData.longPercent > 55 ? 'Bullish positioning' :
-            fundingData?.shortPercent && fundingData.shortPercent > 55 ? 'Bearish positioning' :
-            'Neutral top traders'
-          }
-          status={
-            fundingData?.longPercent && fundingData.longPercent > 55 ? 'bullish' :
-            fundingData?.shortPercent && fundingData.shortPercent > 55 ? 'bearish' : 'neutral'
-          }
-          isLive
-        />
-        
-        <ContextCard
-          icon={Wallet}
-          label="Support Level"
-          value={supportLevel}
-          subLabel={`${supportDistance}% from price`}
-          status="neutral"
-        />
-        
-        <ContextCard
-          icon={TrendingUp}
-          label="Basis"
-          value={`${basis} bps`}
-          subLabel="Futures premium"
-          status={parseFloat(basis) > 5 ? 'bullish' : parseFloat(basis) < -5 ? 'bearish' : 'neutral'}
-          isLive
-        />
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-[9px] text-muted-foreground font-mono">{item.source.title}</span>
+              {item.published_at && (
+                <span className="text-[9px] text-muted-foreground font-mono">{timeAgo(item.published_at)}</span>
+              )}
+              {(item.votes?.positive ?? 0) > 0 && (
+                <span className="text-[9px] font-mono text-bullish">+{item.votes.positive}</span>
+              )}
+            </div>
+          </a>
+        ))}
       </div>
     </div>
   )

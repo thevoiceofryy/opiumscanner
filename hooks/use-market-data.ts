@@ -10,7 +10,6 @@ export function useMarkets(query?: string) {
   const params = new URLSearchParams()
   if (query) params.set('q', query)
   params.set('limit', '50')
-
   return useSWR<Market[]>(
     `/api/polymarket/markets?${params}`,
     fetcher,
@@ -43,7 +42,7 @@ export function useMarketHistory(tokenId: string | null, fidelity: number = 60) 
   return useSWR<{ history: MarketHistoryPoint[]; isMock: boolean }>(
     tokenId ? `/api/polymarket/history?tokenId=${tokenId}&fidelity=${fidelity}` : null,
     fetcher,
-    { refreshInterval: 60000 } // 1 minute
+    { refreshInterval: 60000 }
   )
 }
 
@@ -57,14 +56,24 @@ export function useKlines(symbol: string = 'BTCUSDT', interval: string = '1m', l
   const result = useSWR<KlinesResponse>(
     `/api/crypto/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
     fetcher,
-    { refreshInterval: 1000, dedupingInterval: 500 } // 1 second for live feed
+    {
+      // FIX: was refreshInterval:1000 with dedupingInterval:500
+      // — first render had to wait up to 500ms for dedup window.
+      // Now: revalidateOnMount forces an immediate fetch on every mount,
+      // dedupingInterval:0 means no request is suppressed,
+      // and refreshInterval:1000 keeps it live after that.
+      revalidateOnMount: true,
+      dedupingInterval: 0,
+      refreshInterval: 1000,
+      // Keep previous data visible while revalidating — no flicker/blank chart
+      keepPreviousData: true,
+    }
   )
 
-  // Return with backwards-compatible data extraction
   return {
     ...result,
     data: result.data?.data,
-    isMock: result.data?.isMock ?? false
+    isMock: result.data?.isMock ?? false,
   }
 }
 
@@ -72,7 +81,12 @@ export function useIndicators(symbol: string = 'BTCUSDT', interval: string = '1m
   return useSWR<CryptoData>(
     `/api/crypto/indicators?symbol=${symbol}&interval=${interval}`,
     fetcher,
-    { refreshInterval: 1000, dedupingInterval: 500 } // ~1s live updates
+    {
+      revalidateOnMount: true,
+      dedupingInterval: 0,
+      refreshInterval: 1000,
+      keepPreviousData: true,
+    }
   )
 }
 
@@ -80,7 +94,7 @@ export function useFearGreed() {
   return useSWR<FearGreed>(
     '/api/crypto/fear-greed',
     fetcher,
-    { refreshInterval: 300000 } // 5 minutes
+    { refreshInterval: 300000 }
   )
 }
 
@@ -91,4 +105,3 @@ export function useFunding(symbol: string = 'BTCUSDT') {
     { refreshInterval: 60000 }
   )
 }
-

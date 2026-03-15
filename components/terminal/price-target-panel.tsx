@@ -11,7 +11,7 @@ interface Props {
 export function PriceTargetPanel({ priceToBeat, livePrice }: Props) {
 
   const [history, setHistory] = useState<number[]>([])
-  const [timeLeft, setTimeLeft] = useState(300)
+  const [timeLeft, setTimeLeft] = useState(0)
 
   // Track price history
   useEffect(() => {
@@ -34,9 +34,17 @@ export function PriceTargetPanel({ priceToBeat, livePrice }: Props) {
   // Countdown timer
   useEffect(() => {
 
-    const timer = setInterval(() => {
-      setTimeLeft(prev => prev <= 0 ? 300 : prev - 1)
-    }, 1000)
+    const updateRemaining = () => {
+      const now = Date.now()
+      const bucketMs = 15 * 60 * 1000
+      const bucketStart = Math.floor(now / bucketMs) * bucketMs
+      const bucketEnd = bucketStart + bucketMs
+      const secs = Math.max(0, Math.floor((bucketEnd - now) / 1000))
+      setTimeLeft(secs)
+    }
+
+    updateRemaining()
+    const timer = setInterval(updateRemaining, 250)
 
     return () => clearInterval(timer)
 
@@ -45,6 +53,7 @@ export function PriceTargetPanel({ priceToBeat, livePrice }: Props) {
 
   const minutes = Math.floor(timeLeft / 60)
   const seconds = timeLeft % 60
+  const timeText = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 
 
   const diff =
@@ -53,8 +62,9 @@ export function PriceTargetPanel({ priceToBeat, livePrice }: Props) {
       : null
 
 
-  const max = Math.max(...history, priceToBeat ?? 0, livePrice ?? 0)
-  const min = Math.min(...history, priceToBeat ?? 0, livePrice ?? 0)
+  const baseSeries = [...history, livePrice ?? 0].filter((v) => v > 0)
+  const max = baseSeries.length ? Math.max(...baseSeries) : (priceToBeat ?? livePrice ?? 0)
+  const min = baseSeries.length ? Math.min(...baseSeries) : (priceToBeat ?? livePrice ?? 0)
   const range = max - min || 1
 
 
@@ -68,9 +78,10 @@ export function PriceTargetPanel({ priceToBeat, livePrice }: Props) {
   }).join(' ')
 
 
+  const norm = (value: number) => ((value - min) / range) * 60 + 5
   const targetY =
     priceToBeat !== null
-      ? 70 - ((priceToBeat - min) / range) * 70
+      ? 70 - norm(priceToBeat)
       : 35
 
 
@@ -89,7 +100,7 @@ export function PriceTargetPanel({ priceToBeat, livePrice }: Props) {
 
       {/* VALUES */}
 
-      <div className="flex justify-between font-mono mb-2">
+      <div className="flex justify-between font-mono mb-2 tabular-nums">
 
         <span className="text-orange-400">
           {priceToBeat !== null ? `$${priceToBeat.toLocaleString()}` : '--'}
@@ -99,8 +110,8 @@ export function PriceTargetPanel({ priceToBeat, livePrice }: Props) {
           {livePrice !== null ? `$${livePrice.toLocaleString()}` : '--'}
         </span>
 
-        <span className="text-red-400">
-          {minutes}:{seconds.toString().padStart(2, '0')}
+        <span className="text-red-400 min-w-[48px] text-right">
+          {timeText}
         </span>
 
       </div>

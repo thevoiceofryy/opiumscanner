@@ -45,9 +45,14 @@ export async function updateSession(request: NextRequest) {
 
   // IMPORTANT: If you remove getUser() and you use server-side rendering
   // with the Supabase client, your users may be randomly logged out.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  let user: { id: string } | null = null
+  try {
+    const { data } = await supabase.auth.getUser()
+    user = data?.user ?? null
+  } catch (err) {
+    // Network errors (ECONNRESET, fetch failed) should not break the app
+    console.warn('Supabase auth getUser failed:', (err as Error)?.message ?? err)
+  }
 
   if (
     // if the user is not logged in and the app path, in this case, /protected, is accessed, redirect to the login page

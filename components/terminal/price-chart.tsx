@@ -1,27 +1,14 @@
 'use client'
 
-import { useMemo, useState, useEffect } from 'react'
-
-import {
-  ComposedChart,
-  Area,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  ReferenceLine,
-  CartesianGrid,
-} from 'recharts'
-
-import type { Kline, CryptoData, Market } from '@/lib/types'
+import { useEffect, useRef, useState, useMemo } from 'react'
+import { globalBTCPriceRef } from '@/hooks/use-btc-price'
+import type { Kline, CryptoData } from '@/lib/types'
 
 interface PriceChartProps {
   data: Kline[]
   symbol: string
   interval: string
   cryptoData?: CryptoData | null
-  selectedMarket?: Market | null
   priceToBeat?: number | null
   livePrice?: number | null
 }
@@ -32,231 +19,245 @@ export function PriceChart({
   interval,
   cryptoData,
   priceToBeat,
-  livePrice
+  livePrice,
 }: PriceChartProps) {
-
+  const containerRef = useRef<HTMLDivElement>(null)
+  const chartRef = useRef<any>(null)
+  const candleSeriesRef = useRef<any>(null)
+  const volumeSeriesRef = useRef<any>(null)
+  const targetLineRef = useRef<any>(null)
+  const rafRef = useRef<number | null>(null)
+  const lastCandleRef = useRef<any>(null)
+  const prevRafPrice = useRef<number>(0)
+  const prevPriceRef = useRef<number | null>(null)
+  const [displayPrice, setDisplayPrice] = useState<number>(0)
+  const [priceMove, setPriceMove] = useState<'UP' | 'DOWN' | null>(null)
   const [priceUpdateTime, setPriceUpdateTime] = useState<Date | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
 
-  /*
-  SAFE PRICE ENGINE
-  Prevents $0.00 bug
-  */
-
-  const candlePrice = Number(data[data.length - 1]?.close ?? 0)
-
-  const currentPrice =
-    livePrice && livePrice > 1000
-      ? livePrice
-      : cryptoData?.price && cryptoData.price > 1000
-      ? cryptoData.price
-      : candlePrice
-
-  // Use the live BTC price for the main display; show Polymarket target separately
-  const displayPrice = currentPrice
-
-
-  useEffect(() => {
-    if (!currentPrice) return
-    setPriceUpdateTime(new Date())
-  }, [currentPrice])
-
-
-  const chartData = useMemo(() => {
-
-    if (!data) return []
-
-    return data.slice(-100).map((k, i) => ({
-      idx: i,
-      time: new Date(k.openTime).toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-      }),
-      price: Number(k.close),
-      volume: Number(k.volume)
-    }))
-
+  // Build candles
+  const { candles, volumes } = useMemo(() => {
+    if (!data?.length) return { candles: [], volumes: [] }
+    const candles: any[] = []
+    const volumes: any[] = []
+    data.slice(-120).forEach((k) => {
+      const time = Math.floor(Number(k.openTime) / 1000)
+      const open = Number(k.open)
+      const high = Number(k.high)
+      const low = Number(k.low)
+      const close = Number(k.close)
+      candles.push({ time, open, high, low, close })
+      volumes.push({
+        time,
+        value: Number(k.volume),
+        color: close >= open ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)',
+      })
+    })
+    return { candles, volumes }
   }, [data])
 
+  // Keep lastCandleRef fresh — also has a 5s timeout fallback
+  useEffect(() => {
+    if (candles.length) {
+      lastCandleRef.current = candles[candles.length - 1]
+      setIsLoading(false)
+    }
+  }, [candles])
 
-  const priceRange = useMemo(() => {
+  // Safety fallback — never stay loading more than 5 seconds
+  useEffect(() => {
+    const timeout = setTimeout(() => setIsLoading(false), 5000)
+    return () => clearTimeout(timeout)
+  }, [interval])
 
-    if (!data?.length) return { min: 0, max: 100 }
+  // ── Chart init ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
 
-    const prices = data.flatMap(k => [
-      Number(k.high),
-      Number(k.low)
-    ])
+    setIsLoading(true)
+    if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
+    candleSeriesRef.current = null
+    volumeSeriesRef.current = null
+    targetLineRef.current = null
+    prevRafPrice.current = 0
+    lastCandleRef.current = null
 
-    if (currentPrice) prices.push(currentPrice)
+    let destroyed = false
+    let pollId: ReturnType<typeof setInterval>
 
-    const min = Math.min(...prices)
-    const max = Math.max(...prices)
+    const init = async () => {
+      if (destroyed || !el || el.clientWidth === 0 || el.clientHeight === 0) return
+      const LC = await import('lightweight-charts')
+      if (destroyed) return
 
-    const padding = (max - min) * 0.08
+      const chart = LC.createChart(el, {
+        layout: { background: { color: 'transparent' }, textColor: '#6b7280', fontFamily: 'monospace' },
+        grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.05)' } },
+        crosshair: { vertLine: { color: '#374151', width: 1, style: 3 }, horzLine: { color: '#374151', width: 1, style: 3 } },
+        rightPriceScale: { borderColor: '#1f2937', scaleMargins: { top: 0.1, bottom: 0.25 } },
+        timeScale: { borderColor: '#1f2937', timeVisible: true, secondsVisible: false },
+        width: el.clientWidth,
+        height: el.clientHeight,
+      })
 
-    return {
-      min: min - padding,
-      max: max + padding
+      const candleSeries = chart.addSeries(LC.CandlestickSeries, {
+        upColor: '#22c55e', downColor: '#ef4444',
+        borderUpColor: '#22c55e', borderDownColor: '#ef4444',
+        wickUpColor: '#22c55e', wickDownColor: '#ef4444',
+      })
+      const volumeSeries = chart.addSeries(LC.HistogramSeries, {
+        priceFormat: { type: 'volume' }, priceScaleId: 'volume',
+      })
+      chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } })
+
+      chartRef.current = chart
+      candleSeriesRef.current = candleSeries
+      volumeSeriesRef.current = volumeSeries
+
+      new ResizeObserver(() => {
+        if (el) chart.applyOptions({ width: el.clientWidth, height: el.clientHeight })
+      }).observe(el)
+
+      clearInterval(pollId)
     }
 
-  }, [data, currentPrice])
+    if (el.clientWidth === 0 || el.clientHeight === 0) {
+      pollId = setInterval(() => { if (el.clientWidth > 0 && el.clientHeight > 0) init() }, 50)
+    } else {
+      init()
+    }
 
+    return () => {
+      destroyed = true
+      clearInterval(pollId)
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
+      candleSeriesRef.current = null
+      volumeSeriesRef.current = null
+    }
+  }, [interval])
 
-  if (!data?.length) {
+  // ── Load candle data — only when we have real candles ─────────────────────
+  useEffect(() => {
+    if (!candles.length || !candleSeriesRef.current) return
+    candleSeriesRef.current.setData(candles)
+    volumeSeriesRef.current?.setData(volumes)
+    chartRef.current?.timeScale().fitContent()
+  }, [candles, volumes])
 
-    return (
-      <div className="w-full h-full flex items-center justify-center bg-card">
-        <span className="text-muted-foreground">
-          Fetching {symbol} data...
-        </span>
-      </div>
-    )
+  // ── Target line ────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!candleSeriesRef.current) return
+    if (targetLineRef.current) {
+      try { candleSeriesRef.current.removePriceLine(targetLineRef.current) } catch {}
+      targetLineRef.current = null
+    }
+    if (priceToBeat != null && priceToBeat > 0) {
+      targetLineRef.current = candleSeriesRef.current.createPriceLine({
+        price: priceToBeat, color: '#22c55e', lineWidth: 1,
+        lineStyle: 2, axisLabelVisible: true, title: '▶ TARGET',
+      })
+    }
+  }, [priceToBeat, candles])
 
-  }
+  // ── RAF loop ───────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current)
 
+    const tick = () => {
+      const price = globalBTCPriceRef.current
+      const last = lastCandleRef.current
+      const cs = candleSeriesRef.current
+
+      // Only update chart if we have real candle data loaded
+      if (price > 50000 && last && cs && !isLoading) {
+        if (price !== prevRafPrice.current) {
+          try {
+            cs.update({
+              time: last.time,
+              open: last.open,
+              high: Math.max(last.high, price),
+              low: Math.min(last.low, price),
+              close: price,
+            })
+            prevRafPrice.current = price
+          } catch { }
+        }
+
+        setDisplayPrice(prev => {
+          if (price !== prev) {
+            if (prevPriceRef.current !== null && price !== prevPriceRef.current) {
+              setPriceMove(price > prevPriceRef.current ? 'UP' : 'DOWN')
+              setPriceUpdateTime(new Date())
+              setTimeout(() => setPriceMove(null), 400)
+            }
+            prevPriceRef.current = price
+            return price
+          }
+          return prev
+        })
+      }
+
+      rafRef.current = requestAnimationFrame(tick)
+    }
+
+    rafRef.current = requestAnimationFrame(tick)
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current) }
+  }, [isLoading])
+
+  const showPrice = displayPrice > 50000 ? displayPrice
+    : livePrice && livePrice > 50000 ? livePrice
+    : cryptoData?.price && cryptoData.price > 50000 ? cryptoData.price
+    : Number(data?.[data.length - 1]?.close ?? 0)
 
   return (
-
-    <div className="w-full h-full flex flex-col bg-card">
-
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-
+    <div className="w-full h-full flex flex-col bg-card overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
         <div className="flex items-center gap-3">
-
-          <span className="text-sm font-medium">
-            {symbol}
-          </span>
-
-          <span className="px-2 py-1 text-xs bg-secondary rounded">
-            {interval}
-          </span>
-
+          <span className="text-sm font-medium font-mono">{symbol}</span>
+          <span className="px-2 py-1 text-xs bg-secondary rounded font-mono">{interval}</span>
           {priceUpdateTime && (
-            <span className="text-[10px] text-muted-foreground animate-pulse">
+            <span className="text-[10px] text-muted-foreground">
               🔴 {priceUpdateTime.toLocaleTimeString()}
             </span>
           )}
-
         </div>
-
-        <div className="flex items-center gap-4 font-mono">
-          {/* MAIN DISPLAY PRICE (Polymarket price-to-beat when available) */}
-          <div className="text-2xl font-bold text-red-500">
-            ${displayPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+        <div className="flex items-center gap-6 font-mono">
+          <div className="flex items-baseline gap-2">
+            <span className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">CURRENT</span>
+            <span className={`text-2xl font-bold tabular-nums transition-colors duration-150 ${
+              priceMove === 'UP' ? 'text-emerald-400' :
+              priceMove === 'DOWN' ? 'text-red-500' : 'text-foreground'
+            }`}>
+              ${showPrice.toLocaleString(undefined, { minimumFractionDigits: 3 })}
+            </span>
           </div>
-
-          {/* PRICE TO BEAT LABEL */}
-          {priceToBeat && (
-            <div className="flex items-center gap-1 text-orange-400">
-              <span className="text-[10px] uppercase text-muted-foreground">
-                TARGET
-              </span>
-              <span className="text-sm font-semibold">
+          {priceToBeat != null && priceToBeat > 0 && (
+            <div className="flex items-baseline gap-2">
+              <span className="text-[10px] uppercase font-bold tracking-widest text-orange-200">TARGET</span>
+              <span className="text-lg font-semibold tabular-nums text-orange-400">
                 ${priceToBeat.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </span>
+              <span className={`text-xs font-bold ${showPrice > priceToBeat ? 'text-emerald-400' : 'text-red-400'}`}>
+                {showPrice > priceToBeat ? '▲ ABOVE' : '▼ BELOW'}
               </span>
             </div>
           )}
         </div>
-
       </div>
 
-
-      <div className="flex-1 min-h-0">
-
-        <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={chartData} margin={{ top: 10, right: 16, bottom: 16, left: 0 }}>
-            <defs>
-              <linearGradient id="priceGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#ef4444" stopOpacity={0.9} />
-                <stop offset="100%" stopColor="#0b1220" stopOpacity={0} />
-              </linearGradient>
-              <linearGradient id="volumeGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.7} />
-                <stop offset="100%" stopColor="#020617" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-
-            <CartesianGrid strokeDasharray="2 4" stroke="#1f2937" vertical={false} />
-
-            <XAxis
-              dataKey="time"
-              tick={{ fontSize: 10, fill: '#6b7280' }}
-              tickMargin={8}
-              axisLine={{ stroke: '#1f2937' }}
-              tickLine={false}
-            />
-
-            <YAxis
-              yAxisId="price"
-              domain={[() => priceRange.min, () => priceRange.max]}
-              width={70}
-              tickFormatter={(v) => `$${v.toLocaleString()}`}
-              tick={{ fontSize: 10, fill: '#6b7280' }}
-              axisLine={{ stroke: '#1f2937' }}
-              tickLine={false}
-            />
-
-            <YAxis yAxisId="volume" orientation="right" hide domain={[0, 'auto']} />
-
-            <Tooltip
-              contentStyle={{
-                backgroundColor: '#020617',
-                border: '1px solid #1f2937',
-                borderRadius: 6,
-                fontSize: 11,
-              }}
-              labelStyle={{ color: '#9ca3af' }}
-              formatter={(value: any, name: any) => {
-                if (name === 'price') {
-                  return [`$${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 'Price']
-                }
-                if (name === 'volume') {
-                  return [Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 }), 'Volume']
-                }
-                return [value, name]
-              }}
-            />
-
-            {priceToBeat && priceToBeat > 0 && (
-              <ReferenceLine
-                yAxisId="price"
-                y={priceToBeat}
-                stroke="#22c55e"
-                strokeDasharray="4 4"
-                label={{
-                  value: 'TARGET',
-                  position: 'right',
-                  fill: '#22c55e',
-                  fontSize: 10,
-                }}
-              />
-            )}
-
-            <Area
-              yAxisId="price"
-              type="monotone"
-              dataKey="price"
-              stroke="#ef4444"
-              strokeWidth={2}
-              fill="url(#priceGradient)"
-              dot={false}
-              activeDot={{ r: 3, strokeWidth: 0 }}
-            />
-
-            <Bar
-              yAxisId="volume"
-              dataKey="volume"
-              fill="url(#volumeGradient)"
-              barSize={3}
-            />
-          </ComposedChart>
-        </ResponsiveContainer>
-
+      {/* Loading overlay — shown until candles arrive */}
+      <div className="flex-1 w-full relative" style={{ minHeight: 0 }}>
+        {isLoading && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-card">
+            <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mb-2" />
+            <span className="text-xs font-mono text-muted-foreground">Loading chart data...</span>
+          </div>
+        )}
+        <div ref={containerRef} className="w-full h-full" style={{ minHeight: 0 }} />
       </div>
-
     </div>
-
   )
-
 }
