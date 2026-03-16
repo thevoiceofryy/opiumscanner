@@ -101,7 +101,7 @@ function RSIChart({ times, rsiValues, stochK, stochD }: {
       chartRef.current = chart
 
       // RSI line — purple/colored
-      const rsiSeries = chart.addSeries(LC.LineSeries, {
+      const rsiSeries = chart.addLineSeries({
         color: '#a78bfa',
         lineWidth: 2,
         priceLineVisible: false,
@@ -110,7 +110,7 @@ function RSIChart({ times, rsiValues, stochK, stochD }: {
       })
 
       // Stoch K — yellow solid
-      const kSeries = chart.addSeries(LC.LineSeries, {
+      const kSeries = chart.addLineSeries({
         color: '#eab308',
         lineWidth: 1,
         priceLineVisible: false,
@@ -119,7 +119,7 @@ function RSIChart({ times, rsiValues, stochK, stochD }: {
       })
 
       // Stoch D — yellow dashed (lightweight-charts doesn't support dash natively, use lower opacity)
-      const dSeries = chart.addSeries(LC.LineSeries, {
+      const dSeries = chart.addLineSeries({
         color: '#ca8a04',
         lineWidth: 1,
         lineStyle: 2, // dashed
@@ -212,14 +212,14 @@ function MACDChart({ times, macd, signal, histogram }: {
       const offset = times.length - macd.length
 
       // Histogram — colored bars
-      const histSeries = chart.addSeries(LC.HistogramSeries, {
+      const histSeries = chart.addHistogramSeries({
         priceLineVisible: false,
         lastValueVisible: false,
         title: 'Hist',
       })
 
       // MACD line — blue
-      const macdSeries = chart.addSeries(LC.LineSeries, {
+      const macdSeries = chart.addLineSeries({
         color: '#60a5fa',
         lineWidth: 2,
         priceLineVisible: false,
@@ -228,7 +228,7 @@ function MACDChart({ times, macd, signal, histogram }: {
       })
 
       // Signal line — orange
-      const signalSeries = chart.addSeries(LC.LineSeries, {
+      const signalSeries = chart.addLineSeries({
         color: '#f97316',
         lineWidth: 1,
         priceLineVisible: false,

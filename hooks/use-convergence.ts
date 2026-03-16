@@ -26,13 +26,15 @@ export function useConvergence(
     let downScore = 0
 
     // ── RSI ──────────────────────────────────────────────────────────────────
+    // For BTC UP/DOWN prediction: HIGH RSI = strong momentum = likely ABOVE target
+    // LOW RSI = weak momentum = likely BELOW target
     const rsi = indicators.rsi
-    if (rsi >= 70) downScore += 15
-    else if (rsi >= 60) upScore += 10
-    else if (rsi <= 30) upScore += 15
-    else if (rsi <= 40) downScore += 10
-    else if (rsi >= 50) upScore += 3
-    else downScore += 3
+    if (rsi >= 70) upScore += 15      // Overbought = strong upward momentum = UP
+    else if (rsi >= 60) upScore += 10 // Bullish momentum
+    else if (rsi >= 50) upScore += 5  // Slightly bullish
+    else if (rsi <= 30) downScore += 15 // Oversold = weak momentum = DOWN
+    else if (rsi <= 40) downScore += 10 // Bearish momentum
+    else downScore += 5               // Below 50 = slightly bearish
 
     // ── MACD ─────────────────────────────────────────────────────────────────
     if (indicators.macdHistogram > 0 && indicators.macd > indicators.macdSignal) upScore += 12
@@ -41,23 +43,30 @@ export function useConvergence(
     else downScore += 5
 
     // ── StochRSI ─────────────────────────────────────────────────────────────
+    // For BTC UP/DOWN: HIGH Stoch = strong momentum = likely ABOVE target
     const k = indicators.stochK
     const d = indicators.stochD
-    if (k >= 80 && d >= 80) downScore += 10
-    else if (k <= 20 && d <= 20) upScore += 10
-    else if (k > d) upScore += 5
-    else downScore += 5
+    if (k >= 80 && d >= 80) upScore += 12  // Strong bullish momentum = UP
+    else if (k >= 60) upScore += 8
+    else if (k <= 20 && d <= 20) downScore += 12 // Strong bearish momentum = DOWN
+    else if (k <= 40) downScore += 8
+    else if (k > d) upScore += 4  // K crossing above D = bullish
+    else downScore += 4
 
     // ── Trend ─────────────────────────────────────────────────────────────────
     if (indicators.trend === 'UP') upScore += 10
     else if (indicators.trend === 'DOWN') downScore += 10
 
     // ── VWAP ─────────────────────────────────────────────────────────────────
+    // Price ABOVE VWAP = bullish = likely to stay UP
+    // Price BELOW VWAP = bearish = likely to stay DOWN
     const vd = indicators.vwapDeviation
-    if (vd < -0.3) upScore += 8
-    else if (vd > 0.3) downScore += 8
-    else if (vd >= 0) upScore += 2
-    else downScore += 2
+    if (vd > 1.0) upScore += 12      // Far above VWAP = very bullish
+    else if (vd > 0.3) upScore += 8  // Above VWAP = bullish
+    else if (vd > 0) upScore += 4    // Slightly above
+    else if (vd < -1.0) downScore += 12 // Far below VWAP = very bearish
+    else if (vd < -0.3) downScore += 8
+    else downScore += 4              // Slightly below
 
     // ── Order flow 60s (max ±20) ──────────────────────────────────────────────
     if (buyVolumeRatio60s >= 0.65) upScore += 20

@@ -56,7 +56,7 @@ export function PriceChart({
     return { candles, volumes }
   }, [data])
 
-  // Keep lastCandleRef fresh — also has a 5s timeout fallback
+  // Keep lastCandleRef fresh
   useEffect(() => {
     if (candles.length) {
       lastCandleRef.current = candles[candles.length - 1]
@@ -77,7 +77,12 @@ export function PriceChart({
 
     setIsLoading(true)
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
-    if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
+
+    // Safe cleanup of previous chart
+    try {
+      if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
+    } catch {}
+
     candleSeriesRef.current = null
     volumeSeriesRef.current = null
     targetLineRef.current = null
@@ -86,6 +91,7 @@ export function PriceChart({
 
     let destroyed = false
     let pollId: ReturnType<typeof setInterval>
+    let resizeObserver: ResizeObserver | null = null
 
     const init = async () => {
       if (destroyed || !el || el.clientWidth === 0 || el.clientHeight === 0) return
@@ -102,12 +108,17 @@ export function PriceChart({
         height: el.clientHeight,
       })
 
-      const candleSeries = chart.addSeries(LC.CandlestickSeries, {
+      if (destroyed) {
+        try { chart.remove() } catch {}
+        return
+      }
+
+      const candleSeries = chart.addCandlestickSeries({
         upColor: '#22c55e', downColor: '#ef4444',
         borderUpColor: '#22c55e', borderDownColor: '#ef4444',
         wickUpColor: '#22c55e', wickDownColor: '#ef4444',
       })
-      const volumeSeries = chart.addSeries(LC.HistogramSeries, {
+      const volumeSeries = chart.addHistogramSeries({
         priceFormat: { type: 'volume' }, priceScaleId: 'volume',
       })
       chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } })
@@ -116,9 +127,14 @@ export function PriceChart({
       candleSeriesRef.current = candleSeries
       volumeSeriesRef.current = volumeSeries
 
-      new ResizeObserver(() => {
-        if (el) chart.applyOptions({ width: el.clientWidth, height: el.clientHeight })
-      }).observe(el)
+      resizeObserver = new ResizeObserver(() => {
+        if (el && chartRef.current) {
+          try {
+            chartRef.current.applyOptions({ width: el.clientWidth, height: el.clientHeight })
+          } catch {}
+        }
+      })
+      resizeObserver.observe(el)
 
       clearInterval(pollId)
     }
@@ -132,19 +148,25 @@ export function PriceChart({
     return () => {
       destroyed = true
       clearInterval(pollId)
+      if (resizeObserver) { try { resizeObserver.disconnect() } catch {} }
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
-      if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
+      try {
+        if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
+      } catch {}
       candleSeriesRef.current = null
       volumeSeriesRef.current = null
+      targetLineRef.current = null
     }
   }, [interval])
 
-  // ── Load candle data — only when we have real candles ─────────────────────
+  // ── Load candle data ───────────────────────────────────────────────────────
   useEffect(() => {
     if (!candles.length || !candleSeriesRef.current) return
-    candleSeriesRef.current.setData(candles)
-    volumeSeriesRef.current?.setData(volumes)
-    chartRef.current?.timeScale().fitContent()
+    try {
+      candleSeriesRef.current.setData(candles)
+      volumeSeriesRef.current?.setData(volumes)
+      chartRef.current?.timeScale().fitContent()
+    } catch {}
   }, [candles, volumes])
 
   // ── Target line ────────────────────────────────────────────────────────────
@@ -155,10 +177,12 @@ export function PriceChart({
       targetLineRef.current = null
     }
     if (priceToBeat != null && priceToBeat > 0) {
-      targetLineRef.current = candleSeriesRef.current.createPriceLine({
-        price: priceToBeat, color: '#22c55e', lineWidth: 1,
-        lineStyle: 2, axisLabelVisible: true, title: '▶ TARGET',
-      })
+      try {
+        targetLineRef.current = candleSeriesRef.current.createPriceLine({
+          price: priceToBeat, color: '#22c55e', lineWidth: 1,
+          lineStyle: 2, axisLabelVisible: true, title: '▶ TARGET',
+        })
+      } catch {}
     }
   }, [priceToBeat, candles])
 
@@ -171,7 +195,6 @@ export function PriceChart({
       const last = lastCandleRef.current
       const cs = candleSeriesRef.current
 
-      // Only update chart if we have real candle data loaded
       if (price > 50000 && last && cs && !isLoading) {
         if (price !== prevRafPrice.current) {
           try {
@@ -183,7 +206,7 @@ export function PriceChart({
               close: price,
             })
             prevRafPrice.current = price
-          } catch { }
+          } catch {}
         }
 
         setDisplayPrice(prev => {
@@ -248,7 +271,6 @@ export function PriceChart({
         </div>
       </div>
 
-      {/* Loading overlay — shown until candles arrive */}
       <div className="flex-1 w-full relative" style={{ minHeight: 0 }}>
         {isLoading && (
           <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-card">

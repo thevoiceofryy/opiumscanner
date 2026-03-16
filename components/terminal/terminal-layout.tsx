@@ -35,7 +35,7 @@ export function TerminalLayout() {
   const {
     priceToBeat, probability, marketTitle,
     clobAskYes, clobAskNo, lastResult,
-    upRounds, downRounds, correctRounds, wrongRounds, resultsLog
+    upRounds, downRounds, correctRounds, wrongRounds
   } = usePolymarketRound()
 
   const [intervalIdx, setIntervalIdx] = useState(3)
@@ -68,7 +68,7 @@ export function TerminalLayout() {
               <span className="text-xs font-mono">{selected.label}</span>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto min-h-0">
             <FlowPanel
               cryptoData={cryptoData || null}
               fundingData={fundingData || null}
@@ -82,7 +82,7 @@ export function TerminalLayout() {
               />
             </div>
           </div>
-          <div className="h-32 border-t border-border flex-shrink-0">
+          <div className="h-28 border-t border-border flex-shrink-0">
             <PriceTargetPanel
               klines={klines}
               priceToBeat={priceToBeat && priceToBeat > 0 ? priceToBeat : null}
@@ -109,7 +109,6 @@ export function TerminalLayout() {
           </div>
 
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-            {/* Price chart */}
             <div className="flex-1 h-0 min-h-0">
               <PriceChart
                 data={klines}
@@ -120,8 +119,6 @@ export function TerminalLayout() {
                 livePrice={btcPrice || 0}
               />
             </div>
-
-            {/* RSI + MACD — h-96 gives them enough room to breathe */}
             <div className="h-96 flex-shrink-0 border-t border-border">
               <IndicatorsPanel
                 indicators={cryptoData?.indicators || null}
@@ -150,7 +147,6 @@ export function TerminalLayout() {
               downRounds={downRounds}
               correctRounds={correctRounds}
               wrongRounds={wrongRounds}
-              resultsLog={resultsLog}
             />
           </div>
           <div className="flex-1 min-h-0 overflow-hidden">

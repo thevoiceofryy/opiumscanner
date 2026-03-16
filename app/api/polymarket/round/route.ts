@@ -11,7 +11,7 @@ function isValidBtcPrice(value: number): boolean {
 
 const BINANCE_API          = 'https://api.binance.com/api/v3';
 const COINBASE_EXCHANGE_API = 'https://api.exchange.coinbase.com';
-
+let cachedPriceToBeat: { bucket: number; price: number } | null = null;
 async function fetchBinanceOpen(bucketSeconds: number): Promise<number | null> {
   const startTimeMs = bucketSeconds * 1000;
   const endTimeMs   = startTimeMs + 900_000 - 1;
@@ -33,21 +33,25 @@ async function fetchBinanceOpen(bucketSeconds: number): Promise<number | null> {
 }
 
 async function fetchCoinbaseOpen(bucketSeconds: number): Promise<number | null> {
-  const startIso = new Date(bucketSeconds * 1000).toISOString();
-  const endIso   = new Date((bucketSeconds + 900) * 1000).toISOString();
   try {
+    // Coinbase Advanced Trade API — more reliable for specific candles
+    const start = bucketSeconds;
+    const end = bucketSeconds + 900;
     const res = await fetch(
-      `${COINBASE_EXCHANGE_API}/products/BTC-USD/candles?granularity=900&start=${encodeURIComponent(startIso)}&end=${encodeURIComponent(endIso)}`,
+      `https://api.coinbase.com/api/v3/brokerage/market/products/BTC-USD/candles?start=${start}&end=${end}&granularity=FIFTEEN_MINUTE`,
       { headers: { Accept: 'application/json' }, cache: 'no-store' }
     );
     if (!res.ok) return null;
     const data = await res.json();
-    if (!Array.isArray(data) || !data[0]) return null;
-    const open = parseFloat(String(data[0][3]));
-    console.log(`Coinbase open for bucket ${bucketSeconds}: ${open}`);
+    const candles = data?.candles;
+    if (!Array.isArray(candles) || candles.length === 0) return null;
+    // Find the candle matching our bucket
+    const match = candles.find((c: any) => Math.abs(parseInt(c.start) - bucketSeconds) < 60);
+    const open = match ? parseFloat(match.open) : parseFloat(candles[0].open);
+    console.log(`Coinbase Advanced open for bucket ${bucketSeconds}: ${open}`);
     return isValidBtcPrice(open) ? open : null;
   } catch (e) {
-    console.error('Coinbase fetch error:', e);
+    console.error('Coinbase Advanced fetch error:', e);
     return null;
   }
 }
@@ -78,19 +82,29 @@ const fetchBook = async (tokenId: string | null) => {
     if (!r.ok) return empty;
     const book = await r.json();
 
-    // Log the raw book so we can verify token mapping in server logs
     console.log(`CLOB book for token ${tokenId.slice(0, 10)}...: bids=${book?.bids?.length ?? 0} asks=${book?.asks?.length ?? 0}`)
 
-    const bestBid = book?.bids?.[0] ? parseFloat(book.bids[0].price) : null;
-    const bestAsk = book?.asks?.[0] ? parseFloat(book.asks[0].price) : null;
-    const mid     = bestBid !== null && bestAsk !== null
+    // Sort bids descending (highest first), asks ascending (lowest first)
+    const sortedBids = (book?.bids ?? [])
+      .map((b: any) => parseFloat(b.price))
+      .filter((p: number) => Number.isFinite(p))
+      .sort((a: number, b: number) => b - a);
+
+    const sortedAsks = (book?.asks ?? [])
+      .map((a: any) => parseFloat(a.price))
+      .filter((p: number) => Number.isFinite(p))
+      .sort((a: number, b: number) => a - b);
+
+    const bestBid = sortedBids[0] ?? null;
+    const bestAsk = sortedAsks[0] ?? null;
+    const mid = bestBid !== null && bestAsk !== null
       ? (bestBid + bestAsk) / 2
       : (bestBid ?? bestAsk ?? null);
 
     return {
-      bestBid: Number.isFinite(bestBid!) ? bestBid : null,
-      bestAsk: Number.isFinite(bestAsk!) ? bestAsk : null,
-      mid:     Number.isFinite(mid!)     ? mid     : null,
+      bestBid: bestBid !== null && Number.isFinite(bestBid) ? bestBid : null,
+      bestAsk: bestAsk !== null && Number.isFinite(bestAsk) ? bestAsk : null,
+      mid:     mid     !== null && Number.isFinite(mid)     ? mid     : null,
     };
   } catch { return empty; }
 };
@@ -176,12 +190,45 @@ export async function GET() {
 
     console.log(`CLOB result — UP ask: ${upBook.bestAsk} DOWN ask: ${downBook.bestAsk}`)
 
-    // ── 3. Probability ────────────────────────────────────────────────────────
+    // Fallback: If CLOB doesn't have orderbook data, use outcomePrices from Gamma API
+    // outcomePrices[0] = UP price, outcomePrices[1] = DOWN price
+    const gammaPrices = typeof market.outcomePrices === 'string'
+      ? JSON.parse(market.outcomePrices) : market.outcomePrices;
+    
+    const gammaUpPrice = Array.isArray(gammaPrices) && gammaPrices[0] 
+      ? parseFloat(gammaPrices[0]) : null;
+    const gammaDownPrice = Array.isArray(gammaPrices) && gammaPrices[1]
+      ? parseFloat(gammaPrices[1]) : null;
+
+    console.log(`Gamma prices — UP: ${gammaUpPrice} DOWN: ${gammaDownPrice}`)
+
+    // Use CLOB if available, otherwise fall back to Gamma prices
+    const finalUpAsk = upBook.bestAsk ?? gammaUpPrice;
+    const finalDownAsk = downBook.bestAsk ?? gammaDownPrice;
+
+    // ── 3. Event-level priceToBeat (canonical Polymarket source) ──────────────
+    let eventPriceToBeat: number | null = null;
+    try {
+      const evRes = await fetch(
+        `https://gamma-api.polymarket.com/events/slug/${slug}`,
+        { cache: 'no-store' }
+      );
+      if (evRes.ok) {
+        const ev = await evRes.json();
+        if (ev && typeof ev === 'object') {
+          const meta = ev.eventMetadata ?? ev.metadata ?? ev.data;
+          const raw  = meta?.priceToBeat ?? ev.priceToBeat;
+          const n    = typeof raw === 'number' ? raw : raw != null ? parseFloat(String(raw)) : NaN;
+          if (isValidBtcPrice(n)) eventPriceToBeat = n;
+        }
+      }
+    } catch {}
+
+    // ── 4. Probability ────────────────────────────────────────────────────────
     // outcomePrices[0] = UP probability (matches outcomes[0] = "Up")
     const prices  = typeof market.outcomePrices === 'string'
       ? JSON.parse(market.outcomePrices) : market.outcomePrices;
 
-    // ── FIX: outcomePrices[0] is UP, not DOWN ─────────────────────────────────
     let upProb = Array.isArray(prices) && prices.length > 0
       ? Math.round(parseFloat(prices[0]) * 100)
       : 50;
@@ -193,42 +240,78 @@ export async function GET() {
 
     console.log(`Probability — UP: ${upProb}% (from outcomePrices[0]=${prices?.[0]}, clobMid=${upBook.mid})`)
 
-    // ── 4. Price to beat ──────────────────────────────────────────────────────
-    // FIX: fetch Binance + Coinbase IN PARALLEL — whichever responds first wins.
-    // Previously sequential so a blocked/slow Binance caused 3-5s delay → returned 0.
+    // ── 5. Price to beat ──────────────────────────────────────────────────────
+    // Polymarket should be the source of truth for priceToBeat so we match their UI.
+    const parsePolymarketP2B = (raw: unknown): number => {
+      if (typeof raw === 'number' && isValidBtcPrice(raw)) return raw;
+      if (raw != null) {
+        const n = parseFloat(String(raw));
+        if (isValidBtcPrice(n)) return n;
+      }
+      return 0;
+    };
+
     let priceToBeat       = 0;
-    let priceToBeatSource = 'unknown';
+    let priceToBeatSource = 'polymarket';
 
-    const [binanceOpen, coinbaseOpen] = await Promise.all([
-      fetchBinanceOpen(bucket),
-      fetchCoinbaseOpen(bucket),
-    ]);
-
-    if (coinbaseOpen !== null) {
-      // Prefer Coinbase — more reliable in all regions
-      priceToBeat       = coinbaseOpen;
-      priceToBeatSource = 'coinbase';
-    } else if (binanceOpen !== null) {
-      priceToBeat       = binanceOpen;
-      priceToBeatSource = 'binance';
+    // a) Event-level priceToBeat (closest to Polymarket \"Price to beat\")
+    if (eventPriceToBeat != null && eventPriceToBeat > 0) {
+      priceToBeat = eventPriceToBeat;
+    } else {
+      // b) Market / eventMetadata priceToBeat as backup
+      const fromMarketMeta =
+        (market?.events?.[0]?.eventMetadata?.priceToBeat ??
+         market?.eventMetadata?.priceToBeat ??
+         (market as any)?.priceToBeat);
+      const marketP2B = parsePolymarketP2B(fromMarketMeta);
+      if (marketP2B > 0) {
+        priceToBeat = marketP2B;
+      }
     }
 
-    // Last resort: Coinbase spot ticker (no candle needed, just current price)
+    // TO:
     if (priceToBeat <= 0) {
-      try {
-        const tickerRes = await fetch(
-          'https://api.exchange.coinbase.com/products/BTC-USD/ticker',
-          { cache: 'no-store' }
-        );
-        if (tickerRes.ok) {
-          const ticker = await tickerRes.json();
-          const spot   = parseFloat(ticker.price);
-          if (isValidBtcPrice(spot)) {
-            priceToBeat       = spot;
-            priceToBeatSource = 'coinbase-spot';
-          }
+      // Return cached price if same bucket — don't let it drift mid-round
+      if (cachedPriceToBeat && cachedPriceToBeat.bucket === bucket) {
+        priceToBeat = cachedPriceToBeat.price;
+        priceToBeatSource = 'cached';
+      } else {
+        priceToBeatSource = 'exchange-fallback';
+        const [binanceOpen, coinbaseOpen] = await Promise.all([
+          fetchBinanceOpen(bucket),
+          fetchCoinbaseOpen(bucket),
+        ]);
+
+        if (coinbaseOpen !== null) {
+          priceToBeat       = coinbaseOpen;
+          priceToBeatSource = 'coinbase';
+        } else if (binanceOpen !== null) {
+          priceToBeat       = binanceOpen;
+          priceToBeatSource = 'binance';
         }
-      } catch {}
+
+        if (priceToBeat <= 0) {
+          try {
+            const tickerRes = await fetch(
+              'https://api.exchange.coinbase.com/products/BTC-USD/ticker',
+              { cache: 'no-store' }
+            );
+            if (tickerRes.ok) {
+              const ticker = await tickerRes.json();
+              const spot   = parseFloat(ticker.price);
+              if (isValidBtcPrice(spot)) {
+                priceToBeat       = spot;
+                priceToBeatSource = 'coinbase-spot';
+              }
+            }
+          } catch {}
+        }
+
+        // Lock this price for the rest of the bucket
+        if (priceToBeat > 0) {
+          cachedPriceToBeat = { bucket, price: priceToBeat };
+        }
+      }
     }
 
     console.log(`Final priceToBeat: ${priceToBeat} (source: ${priceToBeatSource})`);
@@ -273,10 +356,10 @@ export async function GET() {
       bucket,
       probability: upProb,
       title,
-      clob: {
-        up:   { tokenId: upTokenId,   ...upBook   },
-        down: { tokenId: downTokenId, ...downBook },
-      },
+clob: {
+  up:   { tokenId: upTokenId,   ...upBook,   bestAsk: finalUpAsk   },
+  down: { tokenId: downTokenId, ...downBook, bestAsk: finalDownAsk },
+  },
       lastRound: {
         bucket: previousBucket,
         result: lastResult,
