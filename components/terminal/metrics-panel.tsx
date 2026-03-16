@@ -17,7 +17,7 @@ function MetricCard({
   isLive = false 
 }: { 
   label: string
-  value: string | number
+  value: React.ReactNode
   subValue?: string
   status?: 'bullish' | 'bearish' | 'neutral' | 'warning'
   isLive?: boolean
@@ -72,7 +72,7 @@ export function MetricsPanel({ cryptoData, fundingData, fearGreed }: MetricsPane
   }
 
   return (
-    <div className="h-full overflow-y-auto p-2">
+<div className="h-full overflow-y-auto p-2 pb-0">
       <div className="flex items-center gap-2 mb-3 px-1">
         <Activity className="w-4 h-4 text-info" />
         <span className="text-xs font-medium uppercase tracking-wider">Metrics</span>

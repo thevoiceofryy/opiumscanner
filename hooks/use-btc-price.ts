@@ -1,43 +1,138 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 
-export function useBTCPrice() {
+// Global ref for real-time BTC price - accessible outside React
+export const globalBTCPriceRef = { current: 0 }
 
-  const [price, setPrice] = useState<number | null>(null)
+// Trade subscriber type
+type TradeCallback = (trade: { id: number; price: number; size: number; side: 'BUY' | 'SELL'; ts: number }) => void
+const tradeSubscribers = new Set<TradeCallback>()
 
-  useEffect(() => {
+export function subscribeToTrades(callback: TradeCallback): () => void {
+  tradeSubscribers.add(callback)
+  return () => tradeSubscribers.delete(callback)
+}
 
-    const fetchPrice = async () => {
+function notifyTradeSubscribers(trade: { id: number; price: number; size: number; side: 'BUY' | 'SELL'; ts: number }) {
+  tradeSubscribers.forEach(cb => cb(trade))
+}
 
-      try {
+// Coinbase Advanced Trade WebSocket - no geo-block, no auth needed for market data
+const COINBASE_WS = 'wss://advanced-trade-api.coinbase.com/ws/user'
+const COINBASE_MARKET_WS = 'wss://advanced-trade-api.coinbase.com/ws/market'
 
-        const res = await fetch(
-          "https://api.coinbase.com/v2/prices/BTC-USD/spot"
-        )
+let wsInstance: WebSocket | null = null
+let wsConnecting = false
+let tradeIdCounter = 0
 
-        const json = await res.json()
+function connectWebSocket() {
+  if (wsInstance || wsConnecting) return
+  // Skip WebSocket on localhost — REST fallback handles it
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') return
+  wsConnecting = true
 
-        const value = parseFloat(json.data.amount)
+  try {
+    // Coinbase public market data WebSocket - no auth required
+    const ws = new WebSocket(COINBASE_MARKET_WS)
 
-        setPrice(value)
+    ws.onopen = () => {
+      wsConnecting = false
+      wsInstance = ws
+      console.log('[useBTCPrice] Coinbase WebSocket connected')
 
-      } catch (err) {
-
-        console.log("Coinbase price fetch error", err)
-
-      }
-
+      // Subscribe to BTC-USD market trades
+      ws.send(JSON.stringify({
+        type: 'subscribe',
+        product_ids: ['BTC-USD'],
+        channel: 'market_trades',
+      }))
     }
 
-    fetchPrice()
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data)
 
-    const interval = setInterval(fetchPrice, 2000)
+        // Coinbase sends { channel: 'market_trades', events: [{ trades: [...] }] }
+        if (msg.channel === 'market_trades' && msg.events) {
+          for (const event of msg.events) {
+            if (event.trades) {
+              for (const trade of event.trades) {
+                const price = parseFloat(trade.price)
+                const size = parseFloat(trade.size)
+                const side = trade.side === 'BUY' ? 'BUY' : 'SELL'
 
-    return () => clearInterval(interval)
+                if (price > 0) {
+                  globalBTCPriceRef.current = price
 
+                  notifyTradeSubscribers({
+                    id: ++tradeIdCounter,
+                    price,
+                    size,
+                    side,
+                    ts: Date.now(),
+                  })
+                }
+              }
+            }
+          }
+        }
+      } catch {}
+    }
+
+    ws.onerror = () => {
+      wsConnecting = false
+      wsInstance = null
+    }
+
+    ws.onclose = () => {
+      wsConnecting = false
+      wsInstance = null
+      setTimeout(connectWebSocket, 3000)
+    }
+  } catch {
+    wsConnecting = false
+  }
+}
+
+export function useBTCPrice() {
+  const [price, setPrice] = useState<number | null>(null)
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    connectWebSocket()
+
+    const updateFromGlobal = () => {
+      if (globalBTCPriceRef.current > 0) {
+        setPrice(globalBTCPriceRef.current)
+      }
+    }
+
+    // Coinbase REST fallback
+    const fetchFallback = async () => {
+      try {
+        const res = await fetch('/api/coinbase/spot')
+        const json = await res.json()
+        const value = parseFloat(json.data.amount)
+        if (value > 0) {
+          globalBTCPriceRef.current = value
+          setPrice(value)
+        }
+      } catch {}
+    }
+
+    fetchFallback()
+    updateFromGlobal()
+
+    intervalRef.current = setInterval(() => {
+      updateFromGlobal()
+      fetchFallback() // always fetch, not just when 0
+    }, 1000)
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current)
+    }
   }, [])
 
   return price
-
 }
