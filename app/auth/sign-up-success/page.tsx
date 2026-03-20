@@ -17,7 +17,7 @@ export default function Page() {
           {/* Branding */}
           <div className="flex items-center justify-center gap-2 mb-2">
             <Zap className="w-8 h-8 text-warning" />
-            <span className="text-2xl font-bold">SigmaTerminal</span>
+            <span className="text-2xl font-bold">🔫 OPIUM SCANNER</span>
           </div>
           
           <Card className="border-border bg-card">

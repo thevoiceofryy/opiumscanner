@@ -9,7 +9,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'SigmaTerminal - Prediction Market Trading Terminal',
+  title: '🔫 OPIUM SCANNER - Prediction Market Trading Terminal',
   description: 'Real-time prediction market analysis with live crypto price feeds, technical indicators, and Polymarket integration',
   generator: 'v0.app',
   keywords: ['polymarket', 'prediction markets', 'crypto', 'trading terminal', 'bitcoin', 'technical analysis'],
