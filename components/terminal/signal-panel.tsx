@@ -92,26 +92,6 @@ export function SignalPanel({
     }
   }, [useKelly, kellySuggestedBet])
 
-  const logPrediction = useCallback(async () => {
-    const currentBucket = Math.floor(Date.now() / 1000 / 900) * 900
-    if (lastLoggedBucketRef.current === currentBucket) return
-    if (direction === 'NEUTRAL') return
-    lastLoggedBucketRef.current = currentBucket
-    try {
-      await fetch('/api/polymarket/results', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bucket: currentBucket, predicted: direction }),
-      })
-    } catch {}
-  }, [direction])
-
-  useEffect(() => {
-    if (remaining > 0 && remaining <= 60 && direction !== 'NEUTRAL') {
-      logPrediction()
-    }
-  }, [remaining, direction, logPrediction])
-
   const ev = useMemo(() => {
     const yesAsk = clobAskYes ?? (confidence / 100)
     const noAsk = clobAskNo ?? (1 - (clobAskYes ?? confidence / 100))
@@ -131,6 +111,44 @@ export function SignalPanel({
 
     return { trueProb, yesEV, noEV, bestSide, yesAsk, noAsk, yesEdge, noEdge, hasEdge }
   }, [trueProb, clobAskYes, clobAskNo, confidence])
+
+  const logPrediction = useCallback(async () => {
+    const currentBucket = Math.floor(Date.now() / 1000 / 900) * 900
+    if (lastLoggedBucketRef.current === currentBucket) return
+    if (direction === 'NEUTRAL') return
+    lastLoggedBucketRef.current = currentBucket
+
+    try {
+      await fetch('/api/polymarket/results', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bucket: currentBucket, predicted: direction }),
+      })
+    } catch {}
+
+    // Send Telegram signal alert
+    try {
+      const edge = direction === 'UP' ? ev.yesEdge : ev.noEdge
+      const prob = direction === 'UP' ? Math.round(trueProb * 100) : Math.round((1 - trueProb) * 100)
+      const ask = direction === 'UP' ? Math.round((ev.yesAsk || 0) * 100) : Math.round((ev.noAsk || 0) * 100)
+
+      const message = direction === 'UP'
+        ? `🟢 <b>SIGNAL: YES (UP)</b>\nModel: ${prob}% | Market: ${ask}¢ | Edge: +${edge.toFixed(0)}%\nConfidence: ${modelConfidence}%`
+        : `🔴 <b>SIGNAL: NO (DOWN)</b>\nModel: ${prob}% | Market: ${ask}¢ | Edge: +${edge.toFixed(0)}%\nConfidence: ${modelConfidence}%`
+
+      await fetch('/api/telegram', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message }),
+      })
+    } catch {}
+  }, [direction, ev, trueProb, modelConfidence])
+
+  useEffect(() => {
+    if (remaining > 0 && remaining <= 60 && direction !== 'NEUTRAL') {
+      logPrediction()
+    }
+  }, [remaining, direction, logPrediction])
 
   const compositeSignal = useMemo(() => {
     const distFromTarget = btcPrice && priceToBeat ? btcPrice - priceToBeat : 0
@@ -241,6 +259,23 @@ export function SignalPanel({
         <button onClick={() => setCollapsed(true)} className="p-1 hover:bg-muted/20 rounded transition-colors">
           <ChevronRight className="w-4 h-4 text-muted-foreground rotate-180" />
         </button>
+      </div>
+
+      {/* ═══ WIN / LOSS ═══ */}
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/30 bg-muted/5">
+        <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Record</span>
+        <div className="flex items-center gap-3">
+          <span className="text-[11px] font-bold text-bullish">{correctRounds}W</span>
+          <span className="text-[10px] text-muted-foreground">/</span>
+          <span className="text-[11px] font-bold text-bearish">{wrongRounds}L</span>
+          {correctRounds + wrongRounds > 0 && (
+            <span className={`text-[10px] font-semibold ${
+              Math.round(correctRounds / (correctRounds + wrongRounds) * 100) >= 55 ? 'text-bullish' : 'text-bearish'
+            }`}>
+              {Math.round(correctRounds / (correctRounds + wrongRounds) * 100)}%
+            </span>
+          )}
+        </div>
       </div>
 
       {/* ═══ PROBABILITY MODEL ═══ */}
@@ -422,23 +457,6 @@ export function SignalPanel({
         </div>
       )}
 
-{/* ═══ WIN / LOSS ═══ */}
-<div className="flex items-center justify-between px-3 py-1.5 border-b border-border/30 bg-muted/5">
-  <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Record</span>
-  <div className="flex items-center gap-3">
-    <span className="text-[11px] font-bold text-bullish">{correctRounds}W</span>
-    <span className="text-[10px] text-muted-foreground">/</span>
-    <span className="text-[11px] font-bold text-bearish">{wrongRounds}L</span>
-    {correctRounds + wrongRounds > 0 && (
-      <span className={`text-[10px] font-semibold ${
-        Math.round(correctRounds / (correctRounds + wrongRounds) * 100) >= 55 ? 'text-bullish' : 'text-bearish'
-      }`}>
-        {Math.round(correctRounds / (correctRounds + wrongRounds) * 100)}%
-      </span>
-    )}
-  </div>
-</div>
-
       {/* ═══ ENTRY WINDOW ═══ */}
       <div className="px-3 py-2 border-b border-border/30">
         <div className={`p-2 rounded border mb-2 ${
@@ -469,7 +487,7 @@ export function SignalPanel({
         </div>
       </div>
 
-      {/* ═══ KELLY CALCULATOR ═══ */}
+      {/* ═══ POSITION SIZE ═══ */}
       <div className="px-3 py-2">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-1">
