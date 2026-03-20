@@ -13,6 +13,7 @@ import { FlowPanel } from './flow-panel'
 import { PriceTargetPanel } from './price-target-panel'
 import { useBTCPrice } from '@/hooks/use-btc-price'
 import { useTargetPriceWebSocket } from '@/hooks/use-target-price-websocket'
+import { AnnouncementBanner } from './announcement-banner'
 
 import {
   useKlines,
@@ -49,6 +50,7 @@ export function TerminalLayout() {
   return (
     <div className="h-screen flex flex-col bg-background overflow-hidden">
       <TerminalHeader />
+      <AnnouncementBanner />
 
       <div className="flex-1 flex flex-col md:grid md:grid-cols-12 gap-0.5 bg-border p-0.5 overflow-y-auto md:overflow-hidden">
 

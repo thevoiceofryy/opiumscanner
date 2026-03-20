@@ -8,7 +8,7 @@ export async function POST(request: Request) {
   try {
     const { message } = await request.json()
     
-    await fetch(`${TELEGRAM_API}/sendMessage`, {
+    const tgRes = await fetch(`${TELEGRAM_API}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -18,8 +18,9 @@ export async function POST(request: Request) {
       }),
     })
 
-    return NextResponse.json({ ok: true })
-  } catch {
-    return NextResponse.json({ error: 'Failed to send' }, { status: 500 })
+    const tgData = await tgRes.json()
+    return NextResponse.json(tgData)
+  } catch (e) {
+    return NextResponse.json({ error: String(e) }, { status: 500 })
   }
 }

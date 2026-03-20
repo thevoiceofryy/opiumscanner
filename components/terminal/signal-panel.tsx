@@ -47,7 +47,9 @@ export function SignalPanel({
   const [selectedSide, setSelectedSide] = useState<'YES' | 'NO'>('YES')
   const [collapsed, setCollapsed] = useState(false)
   const [useKelly, setUseKelly] = useState(true)
-  const lastLoggedSignalRef = useRef<string | null>(null)
+const lastLoggedSignalRef = useRef<string | null>(null)
+const lastSentRef = useRef<number>(0)
+const lastSignalRef = useRef<string | null>(null)
 
   const confidence = marketPrices?.yes !== null ? Math.round(marketPrices.yes ?? 0) : 50
   const indicators = cryptoData?.indicators ?? null
@@ -112,52 +114,65 @@ export function SignalPanel({
     return { trueProb, yesEV, noEV, bestSide, yesAsk, noAsk, yesEdge, noEdge, hasEdge }
   }, [trueProb, clobAskYes, clobAskNo, confidence])
 
-  const logPrediction = useCallback(async () => {
-    const currentBucket = Math.floor(Date.now() / 1000 / 900) * 900
-    if (direction === 'NEUTRAL') return
+const logPrediction = useCallback(async () => {
+  const currentBucket = Math.floor(Date.now() / 1000 / 900) * 900
+  if (direction === 'NEUTRAL') return
 
-    const signalKey = `${currentBucket}-${direction}-${Math.round(trueProb * 100)}`
-    if (lastLoggedSignalRef.current === signalKey) return
-    lastLoggedSignalRef.current = signalKey
+  const signalKey = `${currentBucket}-${direction}-${Math.round(trueProb * 100)}`
 
-    try {
-      await fetch('/api/polymarket/results', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bucket: currentBucket, predicted: direction }),
-      })
-    } catch {}
+  // ✅ prevent duplicate signals
+  if (lastSignalRef.current === signalKey) return
+  lastSignalRef.current = signalKey
 
-    // Send Telegram signal alert
-    try {
-      const edge = direction === 'UP' ? ev.yesEdge : ev.noEdge
-      const prob = direction === 'UP' ? Math.round(trueProb * 100) : Math.round((1 - trueProb) * 100)
-      const ask = direction === 'UP' ? Math.round((ev.yesAsk || 0) * 100) : Math.round((ev.noAsk || 0) * 100)
-      const timeMin = Math.floor(remaining / 60)
-      const timeSec = remaining % 60
+  // ✅ cooldown (30 sec)
+  const now = Date.now()
+  if (now - lastSentRef.current < 30000) return
+  lastSentRef.current = now
 
-      const message = direction === 'UP'
+  try {
+    await fetch('/api/polymarket/results', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bucket: currentBucket, predicted: direction }),
+    })
+  } catch {}
+
+  try {
+    const edge = direction === 'UP' ? ev.yesEdge : ev.noEdge
+    const prob = direction === 'UP'
+      ? Math.round(trueProb * 100)
+      : Math.round((1 - trueProb) * 100)
+
+    const ask = direction === 'UP'
+      ? Math.round((ev.yesAsk || 0) * 100)
+      : Math.round((ev.noAsk || 0) * 100)
+
+    const timeMin = Math.floor(remaining / 60)
+    const timeSec = remaining % 60
+
+    const message =
+      direction === 'UP'
         ? `🟢 <b>SIGNAL: YES (UP)</b>\nModel: ${prob}% | Market: ${ask}¢ | Edge: +${edge.toFixed(0)}%\nConfidence: ${modelConfidence}% | Time left: ${timeMin}:${String(timeSec).padStart(2, '0')}`
         : `🔴 <b>SIGNAL: NO (DOWN)</b>\nModel: ${prob}% | Market: ${ask}¢ | Edge: +${edge.toFixed(0)}%\nConfidence: ${modelConfidence}% | Time left: ${timeMin}:${String(timeSec).padStart(2, '0')}`
 
-      await fetch('/api/telegram', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message }),
-      })
-    } catch {}
-  }, [direction, ev, trueProb, modelConfidence, remaining])
+    await fetch('/api/telegram', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    })
+  } catch {}
+}, [direction, ev, trueProb, modelConfidence, remaining])
 
-  useEffect(() => {
-    if (
-      direction !== 'NEUTRAL' &&
-      modelConfidence >= 40 &&
-      ev.hasEdge &&
-      remaining > 60
-    ) {
-      logPrediction()
-    }
-  }, [modelConfidence, direction, ev.hasEdge])
+useEffect(() => {
+  if (
+    direction !== 'NEUTRAL' &&
+    modelConfidence >= 50 &&   // ⬆️ stronger filter
+    ev.hasEdge &&
+    remaining > 60
+  ) {
+    logPrediction()
+  }
+}, [direction, modelConfidence, ev.hasEdge, remaining])
 
   const compositeSignal = useMemo(() => {
     const distFromTarget = btcPrice && priceToBeat ? btcPrice - priceToBeat : 0
