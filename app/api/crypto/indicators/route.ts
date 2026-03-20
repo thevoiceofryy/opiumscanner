@@ -1,20 +1,28 @@
 import { NextResponse } from 'next/server'
 
+export const dynamic = 'force-dynamic'
+
 const BINANCE_US_API = 'https://api.binance.us/api/v3'
 const BINANCE_GLOBAL_API = 'https://api.binance.com/api/v3'
 
 async function fetchKlinesWithFallback(symbol: string, interval: string, limit: number): Promise<{ data: any[], isMock: boolean }> {
-  const apis = [BINANCE_US_API, BINANCE_GLOBAL_API]
+  const apis = [BINANCE_GLOBAL_API, BINANCE_US_API]
   
   for (const api of apis) {
     try {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 3000)
+      
       const response = await fetch(
         `${api}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
         {
           headers: { 'Accept': 'application/json' },
-          next: { revalidate: 5 }
+          cache: 'no-store',
+          signal: controller.signal
         }
       )
+      clearTimeout(timer)
+      
       if (response.ok) {
         return { data: await response.json(), isMock: false }
       }

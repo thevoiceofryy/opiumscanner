@@ -2,59 +2,81 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-// Coinbase REST candles API - no WebSocket needed, no geo-block
-// Docs: https://docs.cdp.coinbase.com/advanced-trade/reference/retailbrokerageapi_getpubliccandles
+const POLYMARKET_WS = 'wss://ws-live-data.polymarket.com'
 
-export function useTargetPriceWebSocket(symbol: string = 'btcusdt') {
-  const [priceToBeat, setPriceToBeat] = useState<number | null>(null)
-  const [bucket, setBucket] = useState<number | null>(null)
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const lastBucketRef = useRef<number | null>(null)
+export function useTargetPriceWebSocket() {
+  const [chainlinkLive, setChainlinkLive] = useState<number | null>(null)
+
+  const wsRef = useRef<WebSocket | null>(null)
+  const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     let isMounted = true
 
-    async function fetchCandles() {
+    function connect() {
+      if (!isMounted) return
+      if (wsRef.current) {
+        try { wsRef.current.close() } catch {}
+      }
+
       try {
-        const res = await fetch("/api/coinbase/candles")
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const json = await res.json()
-    
-        const candles = json.candles
-        if (!candles || candles.length < 2) return
-    
-        // candles[0] = current open candle, candles[1] = last completed
-        const lastCompleted = candles[1]
-        const closePrice = parseFloat(lastCompleted.close)
-        
-        // start is already in seconds — this IS the bucket key Polymarket uses
-        const bucketSeconds = parseInt(lastCompleted.start)
-    
-        console.log('[Coinbase] raw start:', lastCompleted.start, 'bucket:', bucketSeconds)
-    
-        if (!isMounted) return
-    
-        if (bucketSeconds !== lastBucketRef.current) {
-          lastBucketRef.current = bucketSeconds
-          setPriceToBeat(closePrice)
-          // bucket + 900 = start of NEXT candle = current active round
-          setBucket(bucketSeconds + 900)
-          console.log(`[Coinbase] Target: $${closePrice}, active bucket: ${bucketSeconds + 900}`)
+        const ws = new WebSocket(POLYMARKET_WS)
+        wsRef.current = ws
+
+        ws.onopen = () => {
+          if (!isMounted) return
+          console.log('[Chainlink WS] Connected to Polymarket RTDS')
+          ws.send(JSON.stringify({
+            action: 'subscribe',
+            subscriptions: [
+              {
+                topic: 'crypto_prices_chainlink',
+                type: '*',
+                filters: '{"symbol":"btc/usd"}',
+              }
+            ]
+          }))
         }
-      } catch (err) {
-        console.error('[useTargetPrice] Candle fetch error:', err)
+
+        ws.onmessage = (event) => {
+          if (!isMounted) return
+          try {
+            const msg = JSON.parse(event.data)
+            if (msg.topic === 'crypto_prices_chainlink' && msg.payload) {
+              const price = msg.payload.value
+              if (typeof price !== 'number' || price <= 0) return
+              setChainlinkLive(price)
+            }
+          } catch {}
+        }
+
+        ws.onerror = () => {
+          console.warn('[Chainlink WS] Error, will reconnect')
+        }
+
+        ws.onclose = () => {
+          wsRef.current = null
+          if (isMounted) {
+            reconnectRef.current = setTimeout(connect, 3000)
+          }
+        }
+      } catch {
+        if (isMounted) {
+          reconnectRef.current = setTimeout(connect, 3000)
+        }
       }
     }
 
-    // Fetch immediately then every 15 seconds
-    fetchCandles()
-    intervalRef.current = setInterval(fetchCandles, 15_000)
+    connect()
 
     return () => {
       isMounted = false
-      if (intervalRef.current) clearInterval(intervalRef.current)
+      if (reconnectRef.current) clearTimeout(reconnectRef.current)
+      if (wsRef.current) {
+        try { wsRef.current.close() } catch {}
+      }
     }
-  }, [symbol])
+  }, [])
 
-  return { priceToBeat, bucket }
+  return { chainlinkLive }
 }

@@ -6,6 +6,14 @@ import { subscribeToTrades } from './use-btc-price'
 
 type RoundResult = 'UP' | 'DOWN'
 
+type ResultsLogEntry = {
+  bucket: number
+  result: 'UP' | 'DOWN'
+  predicted?: 'UP' | 'DOWN'
+  correct?: boolean
+  recordedAt: number
+}
+
 export function usePolymarketRound() {
 
   const [marketTitle, setMarketTitle] = useState("Initializing...")
@@ -15,6 +23,16 @@ export function usePolymarketRound() {
   const [clobAskYes, setClobAskYes] = useState<number | null>(null)
   const [clobAskNo, setClobAskNo] = useState<number | null>(null)
 
+  const [bookDepth, setBookDepth] = useState<{
+    upBidDepth: number; upAskDepth: number; upImbalance: number; upSpread: number | null;
+    downBidDepth: number; downAskDepth: number; downImbalance: number; downSpread: number | null;
+    upBidDepth5: number; upAskDepth5: number; downBidDepth5: number; downAskDepth5: number;
+  }>({
+    upBidDepth: 0, upAskDepth: 0, upImbalance: 0, upSpread: null,
+    downBidDepth: 0, downAskDepth: 0, downImbalance: 0, downSpread: null,
+    upBidDepth5: 0, upAskDepth5: 0, downBidDepth5: 0, downAskDepth5: 0,
+  })
+
   const [lastResult, setLastResult] = useState<'UP' | 'DOWN' | 'UNKNOWN'>('UNKNOWN')
 
   const [upRounds, setUpRounds] = useState(0)
@@ -23,16 +41,17 @@ export function usePolymarketRound() {
   const [correctRounds, setCorrectRounds] = useState(0)
   const [wrongRounds, setWrongRounds] = useState(0)
 
+  const [resultsLog, setResultsLog] = useState<ResultsLogEntry[]>([])
+
   const latestIndicatorsRef = useRef<any>(null)
   const latestBtcPriceRef = useRef<number>(0)
   const orderFlowRef = useRef<number>(0.5)
 
   const priceToBeatRef = useRef<number>(0)
-  const priceToBeatBucketRef = useRef<number | null>(null)
 
   const lastPostedBucketRef = useRef<number | null>(null)
 
-  const { priceToBeat: wsPriceToBeat, bucket: wsBucket } = useTargetPriceWebSocket()
+  const { chainlinkLive } = useTargetPriceWebSocket()
 
   useEffect(() => {
     priceToBeatRef.current = priceToBeat
@@ -107,25 +126,6 @@ export function usePolymarketRound() {
 
   }, [])
 
-  // WEBSOCKET TARGET
-  useEffect(() => {
-
-    if (
-      wsPriceToBeat &&
-      wsPriceToBeat > 50000 &&
-      wsBucket &&
-      priceToBeatBucketRef.current !== wsBucket
-    ) {
-
-      priceToBeatBucketRef.current = wsBucket
-
-      priceToBeatRef.current = wsPriceToBeat
-
-      setPriceToBeat(wsPriceToBeat)
-
-    }
-
-  }, [wsPriceToBeat, wsBucket])
 
   // MAIN POLLING
   useEffect(() => {
@@ -142,11 +142,8 @@ export function usePolymarketRound() {
         const apiPrice = data.priceToBeat ?? 0
 
         if (apiPrice > 50000 && apiPrice < 200000) {
-
           setPriceToBeat(apiPrice)
-
           priceToBeatRef.current = apiPrice
-
         }
 
         const prob = data.probability ?? 50
@@ -154,7 +151,6 @@ export function usePolymarketRound() {
         setProbability(prob)
 
         // REAL CLOB DATA
-
         const rawYesAsk = data?.clob?.up?.bestAsk
         const rawNoAsk = data?.clob?.down?.bestAsk
 
@@ -170,6 +166,22 @@ export function usePolymarketRound() {
 
         setClobAskYes(yesValid ? rawYesAsk : null)
         setClobAskNo(noValid ? rawNoAsk : null)
+
+        // Orderbook depth data
+        setBookDepth({
+          upBidDepth: data?.clob?.up?.bidDepth ?? 0,
+          upAskDepth: data?.clob?.up?.askDepth ?? 0,
+          upImbalance: data?.clob?.up?.imbalance ?? 0,
+          upSpread: data?.clob?.up?.spread ?? null,
+          downBidDepth: data?.clob?.down?.bidDepth ?? 0,
+          downAskDepth: data?.clob?.down?.askDepth ?? 0,
+          downImbalance: data?.clob?.down?.imbalance ?? 0,
+          downSpread: data?.clob?.down?.spread ?? null,
+          upBidDepth5: data?.clob?.up?.bidDepth5pct ?? 0,
+          upAskDepth5: data?.clob?.up?.askDepth5pct ?? 0,
+          downBidDepth5: data?.clob?.down?.bidDepth5pct ?? 0,
+          downAskDepth5: data?.clob?.down?.askDepth5pct ?? 0,
+        })
 
         console.log('CLOB PRICES', {
           yes: rawYesAsk,
@@ -209,6 +221,7 @@ export function usePolymarketRound() {
                 setDownRounds(global.downRounds ?? 0)
                 setCorrectRounds(global.correctRounds ?? 0)
                 setWrongRounds(global.wrongRounds ?? 0)
+                setResultsLog(global.resultsLog ?? [])
 
               }
 
@@ -240,6 +253,7 @@ export function usePolymarketRound() {
           setDownRounds(data.downRounds ?? 0)
           setCorrectRounds(data.correctRounds ?? 0)
           setWrongRounds(data.wrongRounds ?? 0)
+          setResultsLog(data.resultsLog ?? [])
 
         }
 
@@ -255,14 +269,23 @@ export function usePolymarketRound() {
 
     const early = setTimeout(fetchRound, 2500)
 
+    // Fast poll at bucket boundaries to catch new price to beat quickly
+    const fastPollInterval = setInterval(() => {
+      const nowSec = Math.floor(Date.now() / 1000)
+      const secIntoBucket = nowSec % 900
+      // Poll every 500ms in first 30s of bucket, else every 2s
+      if (secIntoBucket < 30) {
+        fetchRound()
+      }
+    }, 500)
+
     const interval = setInterval(fetchRound, 2000)
 
     return () => {
-
       clearTimeout(early)
+      clearInterval(fastPollInterval)
       clearInterval(interval)
       clearInterval(resultsInterval)
-
     }
 
   }, [])
@@ -276,13 +299,17 @@ export function usePolymarketRound() {
     clobAskYes,
     clobAskNo,
 
+    bookDepth,
+
     lastResult,
 
     upRounds,
     downRounds,
 
     correctRounds,
-    wrongRounds
+    wrongRounds,
+
+    resultsLog,
 
   }
 

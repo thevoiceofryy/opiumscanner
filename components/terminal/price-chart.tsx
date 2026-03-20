@@ -11,6 +11,63 @@ interface PriceChartProps {
   cryptoData?: CryptoData | null
   priceToBeat?: number | null
   livePrice?: number | null
+  onChartReady?: (timeScale: any) => void
+  onChartDestroy?: () => void
+}
+
+function computeATR(candles: any[], period = 14): number {
+  if (candles.length < period + 1) return 0
+  const trs = candles.slice(1).map((c: any, i: number) => {
+    const prev = candles[i]
+    return Math.max(
+      c.high - c.low,
+      Math.abs(c.high - prev.close),
+      Math.abs(c.low - prev.close)
+    )
+  })
+  return trs.slice(-period).reduce((a: number, b: number) => a + b, 0) / period
+}
+
+function computeBB(candles: any[], period = 20) {
+  const upper: any[] = [], middle: any[] = [], lower: any[] = []
+  const closes = candles.map((c: any) => c.close)
+  for (let i = period - 1; i < candles.length; i++) {
+    const slice = closes.slice(i - period + 1, i + 1)
+    const mean  = slice.reduce((a: number, b: number) => a + b, 0) / period
+    const std   = Math.sqrt(
+      slice.reduce((a: number, b: number) => a + (b - mean) ** 2, 0) / period
+    )
+    upper.push({ time: candles[i].time, value: mean + 2 * std })
+    middle.push({ time: candles[i].time, value: mean })
+    lower.push({ time: candles[i].time, value: mean - 2 * std })
+  }
+  return { upper, middle, lower }
+}
+
+function makeChartOptions(el: HTMLDivElement, extra?: any) {
+  return {
+    layout: {
+      background: { color: '#0a0e14' },
+      textColor: '#4b5563',
+      fontFamily: 'monospace',
+      fontSize: 10,
+    },
+    grid: {
+      vertLines: { color: 'rgba(255,255,255,0.025)' },
+      horzLines: { color: 'rgba(255,255,255,0.03)' },
+    },
+    crosshair: {
+      mode: 0,
+      vertLine:  { color: 'rgba(255,255,255,0.12)', width: 1, style: 0, labelBackgroundColor: '#1f2937' },
+      horzLine:  { color: 'rgba(255,255,255,0.12)', width: 1, style: 0, labelBackgroundColor: '#1f2937' },
+    },
+    handleScroll: true,
+    handleScale: true,
+    kineticScroll: { touch: true, mouse: true },
+    width:  el.clientWidth  || 800,
+    height: el.clientHeight || 400,
+    ...extra,
+  }
 }
 
 export function PriceChart({
@@ -20,156 +77,213 @@ export function PriceChart({
   cryptoData,
   priceToBeat,
   livePrice,
+  onChartReady,
+  onChartDestroy,
 }: PriceChartProps) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const chartRef = useRef<any>(null)
-  const candleSeriesRef = useRef<any>(null)
-  const volumeSeriesRef = useRef<any>(null)
-  const targetLineRef = useRef<any>(null)
-  const rafRef = useRef<number | null>(null)
-  const lastCandleRef = useRef<any>(null)
-  const prevRafPrice = useRef<number>(0)
-  const prevPriceRef = useRef<number | null>(null)
-  const [displayPrice, setDisplayPrice] = useState<number>(0)
-  const [priceMove, setPriceMove] = useState<'UP' | 'DOWN' | null>(null)
-  const [priceUpdateTime, setPriceUpdateTime] = useState<Date | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const mainRef = useRef<HTMLDivElement>(null)
 
-  // Build candles
-  const { candles, volumes } = useMemo(() => {
-    if (!data?.length) return { candles: [], volumes: [] }
+  const mainChartRef    = useRef<any>(null)
+  const candleSeriesRef = useRef<any>(null)
+  const volSeriesRef    = useRef<any>(null)
+  const bbUpperRef      = useRef<any>(null)
+  const bbMidRef        = useRef<any>(null)
+  const bbLowerRef      = useRef<any>(null)
+  const targetLineRef   = useRef<any>(null)
+  const rafRef          = useRef<number | null>(null)
+  const lastCandleRef   = useRef<any>(null)
+  const prevRafPrice    = useRef<number>(0)
+  const prevPriceRef    = useRef<number | null>(null)
+
+  const [displayPrice,     setDisplayPrice]     = useState<number>(0)
+  const [priceMove,        setPriceMove]        = useState<'UP' | 'DOWN' | null>(null)
+  const [priceUpdateTime,  setPriceUpdateTime]  = useState<Date | null>(null)
+  const [isLoading,        setIsLoading]        = useState(true)
+  const [chartError,       setChartError]       = useState<string | null>(null)
+
+  const { candles, volumes, times, closes, atr, priceDelta } = useMemo(() => {
+    if (!data?.length)
+      return { candles: [], volumes: [], times: [], closes: [], atr: 0, priceDelta: 0 }
+
     const candles: any[] = []
     const volumes: any[] = []
+
     data.slice(-120).forEach((k) => {
-      const time = Math.floor(Number(k.openTime) / 1000)
-      const open = Number(k.open)
-      const high = Number(k.high)
-      const low = Number(k.low)
+      const time  = Math.floor(Number(k.openTime) / 1000)
+      const open  = Number(k.open)
+      const high  = Number(k.high)
+      const low   = Number(k.low)
       const close = Number(k.close)
       candles.push({ time, open, high, low, close })
       volumes.push({
         time,
         value: Number(k.volume),
-        color: close >= open ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)',
+        color: close >= open ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)',
       })
     })
-    return { candles, volumes }
+
+    const closes     = candles.map((c: any) => c.close)
+    const times      = candles.map((c: any) => c.time)
+    const atr        = computeATR(candles)
+    const priceDelta = candles.length >= 2
+      ? candles[candles.length - 1].close - candles[candles.length - 2].close
+      : 0
+
+    return { candles, volumes, times, closes, atr, priceDelta }
   }, [data])
 
-  // Keep lastCandleRef fresh
   useEffect(() => {
     if (candles.length) {
       lastCandleRef.current = candles[candles.length - 1]
       setIsLoading(false)
+      setChartError(null)
     }
   }, [candles])
 
-  // Safety fallback — never stay loading more than 5 seconds
+  // Force loading off after 3s max
   useEffect(() => {
-    const timeout = setTimeout(() => setIsLoading(false), 5000)
-    return () => clearTimeout(timeout)
+    const t = setTimeout(() => setIsLoading(false), 3000)
+    return () => clearTimeout(t)
   }, [interval])
 
-  // ── Chart init ─────────────────────────────────────────────────────────────
+  // ── Init chart ────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
+    const mainEl = mainRef.current
+    if (!mainEl) { setChartError('Chart container not found'); return }
 
     setIsLoading(true)
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
-
-    // Safe cleanup of previous chart
-    try {
-      if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
-    } catch {}
-
-    candleSeriesRef.current = null
-    volumeSeriesRef.current = null
-    targetLineRef.current = null
-    prevRafPrice.current = 0
+    try { mainChartRef.current?.remove(); mainChartRef.current = null } catch {}
+    prevRafPrice.current  = 0
     lastCandleRef.current = null
 
-    let destroyed = false
-    let pollId: ReturnType<typeof setInterval>
-    let resizeObserver: ResizeObserver | null = null
+    let destroyed   = false
+    let resizeObs: ResizeObserver | null = null
 
     const init = async () => {
-      if (destroyed || !el || el.clientWidth === 0 || el.clientHeight === 0) return
-      const LC = await import('lightweight-charts')
-      if (destroyed) return
+      try {
+        if (destroyed) return
+        const LC = await import('lightweight-charts')
+        if (destroyed) return
 
-      const chart = LC.createChart(el, {
-        layout: { background: { color: 'transparent' }, textColor: '#6b7280', fontFamily: 'monospace' },
-        grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.05)' } },
-        crosshair: { vertLine: { color: '#374151', width: 1, style: 3 }, horzLine: { color: '#374151', width: 1, style: 3 } },
-        rightPriceScale: { borderColor: '#1f2937', scaleMargins: { top: 0.1, bottom: 0.25 } },
-        timeScale: { borderColor: '#1f2937', timeVisible: true, secondsVisible: false },
-        width: el.clientWidth,
-        height: el.clientHeight,
-      })
+        const main = LC.createChart(mainEl, {
+          ...makeChartOptions(mainEl),
+          leftPriceScale: {
+            visible: true,
+            borderColor:  '#1a2332',
+            scaleMargins: { top: 0.07, bottom: 0.2 },
+            textColor:    '#4b5563',
+          },
+          rightPriceScale: {
+            visible: false,
+            borderColor:  '#1a2332',
+            scaleMargins: { top: 0.07, bottom: 0.2 },
+            textColor:    '#4b5563',
+          },
+          timeScale: {
+            borderColor:  '#1a2332',
+            timeVisible:  false,
+            textColor:    '#4b5563',
+          },
+        })
+        mainChartRef.current = main
 
-      if (destroyed) {
-        try { chart.remove() } catch {}
-        return
-      }
+        candleSeriesRef.current = main.addCandlestickSeries({
+          upColor:        '#10b981', downColor:        '#ef4444',
+          borderUpColor:  '#10b981', borderDownColor:  '#ef4444',
+          wickUpColor:    '#10b981', wickDownColor:    '#ef4444',
+          priceScaleId:   'left',
+        })
 
-      const candleSeries = chart.addCandlestickSeries({
-        upColor: '#22c55e', downColor: '#ef4444',
-        borderUpColor: '#22c55e', borderDownColor: '#ef4444',
-        wickUpColor: '#22c55e', wickDownColor: '#ef4444',
-      })
-      const volumeSeries = chart.addHistogramSeries({
-        priceFormat: { type: 'volume' }, priceScaleId: 'volume',
-      })
-      chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } })
+        volSeriesRef.current = main.addHistogramSeries({
+          priceFormat:  { type: 'volume' },
+          priceScaleId: 'vol',
+        })
+        main.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } })
 
-      chartRef.current = chart
-      candleSeriesRef.current = candleSeries
-      volumeSeriesRef.current = volumeSeries
+        bbUpperRef.current = main.addLineSeries({
+          color: 'rgba(255,255,255,0.15)', lineWidth: 1,
+          priceLineVisible: false, lastValueVisible: false,
+          priceScaleId: 'left',
+        })
+        bbMidRef.current = main.addLineSeries({
+          color: 'rgba(255,255,255,0.07)', lineWidth: 1, lineStyle: 2,
+          priceLineVisible: false, lastValueVisible: false,
+          priceScaleId: 'left',
+        })
+        bbLowerRef.current = main.addLineSeries({
+          color: 'rgba(255,255,255,0.15)', lineWidth: 1,
+          priceLineVisible: false, lastValueVisible: false,
+          priceScaleId: 'left',
+        })
 
-      resizeObserver = new ResizeObserver(() => {
-        if (el && chartRef.current) {
+        if (onChartReady) onChartReady(main.timeScale())
+
+        resizeObs = new ResizeObserver(() => {
           try {
-            chartRef.current.applyOptions({ width: el.clientWidth, height: el.clientHeight })
+            if (mainEl && mainChartRef.current)
+              mainChartRef.current.applyOptions({
+                width:  mainEl.clientWidth,
+                height: mainEl.clientHeight,
+              })
           } catch {}
+        })
+        resizeObs.observe(mainEl)
+
+        setChartError(null)
+        if (!destroyed) setIsLoading(false)
+      } catch (error) {
+        console.error('Error initializing chart:', error)
+        if (!destroyed) {
+          setChartError(error instanceof Error ? error.message : 'Failed to initialize chart')
+          setIsLoading(false)
         }
-      })
-      resizeObserver.observe(el)
-
-      clearInterval(pollId)
+      }
     }
 
-    if (el.clientWidth === 0 || el.clientHeight === 0) {
-      pollId = setInterval(() => { if (el.clientWidth > 0 && el.clientHeight > 0) init() }, 50)
-    } else {
-      init()
-    }
+    init().catch(err => {
+      console.error('Chart init failed:', err)
+      if (!destroyed) setIsLoading(false)
+    })
 
     return () => {
       destroyed = true
-      clearInterval(pollId)
-      if (resizeObserver) { try { resizeObserver.disconnect() } catch {} }
+      if (onChartDestroy) onChartDestroy()
+      resizeObs?.disconnect()
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
-      try {
-        if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
-      } catch {}
-      candleSeriesRef.current = null
-      volumeSeriesRef.current = null
-      targetLineRef.current = null
+      try { mainChartRef.current?.remove(); mainChartRef.current = null } catch {}
     }
-  }, [interval])
+  }, [])
 
-  // ── Load candle data ───────────────────────────────────────────────────────
+  // ── Populate data with retry ──────────────────────────────────────────────────
   useEffect(() => {
-    if (!candles.length || !candleSeriesRef.current) return
-    try {
-      candleSeriesRef.current.setData(candles)
-      volumeSeriesRef.current?.setData(volumes)
-      chartRef.current?.timeScale().fitContent()
-    } catch {}
-  }, [candles, volumes])
+    if (!candles.length) return
 
-  // ── Target line ────────────────────────────────────────────────────────────
+    const tryPopulate = () => {
+      if (!candleSeriesRef.current) {
+        setTimeout(tryPopulate, 100)
+        return
+      }
+      try {
+        lastCandleRef.current = candles[candles.length - 1]
+        candleSeriesRef.current?.setData(candles)
+        volSeriesRef.current?.setData(volumes)
+        const bb = computeBB(candles)
+        bbUpperRef.current?.setData(bb.upper)
+        bbMidRef.current?.setData(bb.middle)
+        bbLowerRef.current?.setData(bb.lower)
+        mainChartRef.current?.timeScale().fitContent()
+        setIsLoading(false)
+        setChartError(null)
+      } catch (error) {
+        console.error('Error populating chart data:', error)
+        setChartError(error instanceof Error ? error.message : 'Failed to populate chart data')
+      }
+    }
+
+    tryPopulate()
+  }, [candles, volumes, times])
+
+  // ── Target price line ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!candleSeriesRef.current) return
     if (targetLineRef.current) {
@@ -179,36 +293,37 @@ export function PriceChart({
     if (priceToBeat != null && priceToBeat > 0) {
       try {
         targetLineRef.current = candleSeriesRef.current.createPriceLine({
-          price: priceToBeat, color: '#22c55e', lineWidth: 1,
-          lineStyle: 2, axisLabelVisible: true, title: '▶ TARGET',
+          price:            priceToBeat,
+          color:            '#ef4444',
+          lineWidth:        1,
+          lineStyle:        2,
+          axisLabelVisible: true,
+          title:            'TARGET ◀',
         })
       } catch {}
     }
   }, [priceToBeat, candles])
 
-  // ── RAF loop ───────────────────────────────────────────────────────────────
+  // ── Live price RAF ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
-
     const tick = () => {
       const price = globalBTCPriceRef.current
-      const last = lastCandleRef.current
-      const cs = candleSeriesRef.current
-
+      const last  = lastCandleRef.current
+      const cs    = candleSeriesRef.current
       if (price > 50000 && last && cs && !isLoading) {
         if (price !== prevRafPrice.current) {
           try {
             cs.update({
-              time: last.time,
-              open: last.open,
-              high: Math.max(last.high, price),
-              low: Math.min(last.low, price),
+              time:  last.time,
+              open:  last.open,
+              high:  Math.max(last.high, price),
+              low:   Math.min(last.low,  price),
               close: price,
             })
             prevRafPrice.current = price
           } catch {}
         }
-
         setDisplayPrice(prev => {
           if (price !== prev) {
             if (prevPriceRef.current !== null && price !== prevPriceRef.current) {
@@ -222,63 +337,89 @@ export function PriceChart({
           return prev
         })
       }
-
       rafRef.current = requestAnimationFrame(tick)
     }
-
     rafRef.current = requestAnimationFrame(tick)
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current) }
   }, [isLoading])
 
-  const showPrice = displayPrice > 50000 ? displayPrice
-    : livePrice && livePrice > 50000 ? livePrice
-    : cryptoData?.price && cryptoData.price > 50000 ? cryptoData.price
-    : Number(data?.[data.length - 1]?.close ?? 0)
+  const showPrice  = displayPrice > 50000
+    ? displayPrice
+    : livePrice && livePrice > 50000
+      ? livePrice
+      : cryptoData?.price && cryptoData.price > 50000
+        ? cryptoData.price
+        : Number(data?.[data.length - 1]?.close ?? 0)
+
+  const priceColor = priceMove === 'UP' ? '#10b981' : priceMove === 'DOWN' ? '#ef4444' : '#e5e7eb'
+  const deltaColor = priceDelta >= 0 ? '#10b981' : '#ef4444'
 
   return (
-    <div className="w-full h-full flex flex-col bg-card overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-medium font-mono">{symbol}</span>
-          <span className="px-2 py-1 text-xs bg-secondary rounded font-mono">{interval}</span>
-          {priceUpdateTime && (
-            <span className="text-[10px] text-muted-foreground">
-              🔴 {priceUpdateTime.toLocaleTimeString()}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-6 font-mono">
-          <div className="flex items-baseline gap-2">
-            <span className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">CURRENT</span>
-            <span className={`text-2xl font-bold tabular-nums transition-colors duration-150 ${
-              priceMove === 'UP' ? 'text-emerald-400' :
-              priceMove === 'DOWN' ? 'text-red-500' : 'text-foreground'
-            }`}>
-              ${showPrice.toLocaleString(undefined, { minimumFractionDigits: 3 })}
-            </span>
-          </div>
-          {priceToBeat != null && priceToBeat > 0 && (
-            <div className="flex items-baseline gap-2">
-              <span className="text-[10px] uppercase font-bold tracking-widest text-orange-200">TARGET</span>
-              <span className="text-lg font-semibold tabular-nums text-orange-400">
-                ${priceToBeat.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-              </span>
-              <span className={`text-xs font-bold ${showPrice > priceToBeat ? 'text-emerald-400' : 'text-red-400'}`}>
-                {showPrice > priceToBeat ? '▲ ABOVE' : '▼ BELOW'}
-              </span>
-            </div>
-          )}
-        </div>
+    <div className="w-full h-full flex flex-col bg-[#0a0e14] overflow-hidden">
+
+      {/* ── TOP HEADER ── */}
+      <div
+        className="flex items-center gap-2 px-3 shrink-0 font-mono"
+        style={{ height: '32px', borderBottom: '1px solid #1a2332' }}
+      >
+        <span className="text-[11px] font-bold text-white">{symbol}</span>
+        <span className="text-[10px] text-[#4b5563]">·</span>
+        <span className="text-[10px] text-[#9ca3af]">{interval}</span>
+        <span className="text-[10px] text-[#4b5563]">·</span>
+        <span className="text-[10px] text-[#9ca3af]">HA</span>
+        <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse ml-0.5" />
+        <span
+          className="text-[12px] font-bold tabular-nums ml-1 transition-colors duration-150"
+          style={{ color: priceColor }}
+        >
+          ${showPrice > 1000
+            ? showPrice.toLocaleString(undefined, { minimumFractionDigits: 0 })
+            : showPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+        </span>
+        <span className="text-[10px] font-bold tabular-nums" style={{ color: deltaColor }}>
+          {priceDelta >= 0 ? '+' : ''}${Math.abs(priceDelta).toFixed(0)}
+        </span>
+
+        <div className="flex-1" />
+
+        {atr > 0 && (
+          <span className="text-[10px] text-[#6b7280]">
+            ATR <span className="text-[#9ca3af]">${Math.round(atr)}</span>
+          </span>
+        )}
+        <span className="text-[10px] text-[#6b7280] border border-[#1f2937] px-1.5 py-0.5 rounded">
+          NY_OPEN
+        </span>
+        <span className="text-[10px] text-[#f59e0b] border border-[#f59e0b]/30 px-1.5 py-0.5 rounded bg-[#f59e0b]/10">
+          Binance ✓
+        </span>
+        {priceToBeat != null && priceToBeat > 0 && (
+          <span className={`text-[10px] font-bold ${showPrice > priceToBeat ? 'text-emerald-400' : 'text-red-400'}`}>
+            TARGET ${priceToBeat.toLocaleString(undefined, { minimumFractionDigits: 2 })}{' '}
+            {showPrice > priceToBeat ? '▲' : '▼'}
+          </span>
+        )}
       </div>
 
-      <div className="flex-1 w-full relative" style={{ minHeight: 0 }}>
+      {/* ── MAIN CHART ── */}
+      <div className="relative flex-1 min-h-0">
         {isLoading && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-card">
-            <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mb-2" />
-            <span className="text-xs font-mono text-muted-foreground">Loading chart data...</span>
+          <div className="absolute inset-0 flex items-center justify-center z-10 bg-[#0a0e14]">
+            <div className="flex flex-col items-center gap-2">
+              <div className="w-4 h-4 border border-emerald-500 border-t-transparent rounded-full animate-spin" />
+              <span className="text-xs text-muted-foreground">Loading chart...</span>
+            </div>
           </div>
         )}
-        <div ref={containerRef} className="w-full h-full" style={{ minHeight: 0 }} />
+        {chartError && (
+          <div className="absolute inset-0 flex items-center justify-center z-10 bg-[#0a0e14]">
+            <div className="text-red-400 text-sm text-center px-4">
+              <p>Chart Error: {chartError}</p>
+              <p className="text-xs text-muted-foreground mt-1">Check browser console for details</p>
+            </div>
+          </div>
+        )}
+        <div ref={mainRef} className="w-full h-full" />
       </div>
     </div>
   )

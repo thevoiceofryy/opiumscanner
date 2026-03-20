@@ -1,18 +1,25 @@
 import { NextResponse } from 'next/server'
 
+export const dynamic = 'force-dynamic'
+
 // Multiple API sources for funding data
 const COINGLASS_API = 'https://open-api.coinglass.com/public/v2'
 
 async function fetchFundingData(symbol: string) {
   // Try CoinGlass first (works globally, no auth needed for basic data)
   try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 3000)
+    
     const response = await fetch(
       `${COINGLASS_API}/funding?symbol=${symbol.replace('USDT', '')}`,
       {
         headers: { 'Accept': 'application/json' },
-        next: { revalidate: 60 }
+        cache: 'no-store',
+        signal: controller.signal
       }
     )
+    clearTimeout(timer)
     
     if (response.ok) {
       const data = await response.json()

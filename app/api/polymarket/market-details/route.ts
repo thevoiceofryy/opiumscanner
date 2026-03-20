@@ -27,17 +27,27 @@ export async function GET(request: Request) {
     }
 
     const market = await response.json()
-
+console.log('FULL MARKET:', JSON.stringify(market, null, 2))
     // Prefer Polymarket's own priceToBeat from event metadata
-    let priceToBeat: number | null = null
+let priceToBeat: number | null = null
 
-    // Some markets expose eventMetadata.priceToBeat at the event level
-    if (market?.events && Array.isArray(market.events) && market.events.length > 0) {
-      const eventMeta = market.events[0]?.eventMetadata
-      if (eventMeta && typeof eventMeta.priceToBeat === 'number') {
-        priceToBeat = eventMeta.priceToBeat
-      }
-    }
+// Check direct market field first (most common in Gamma API)
+if (market?.priceToBeat != null) {
+  priceToBeat = parseFloat(market.priceToBeat)
+}
+
+// Fall back to events[0] eventMetadata
+if (priceToBeat === null && Array.isArray(market?.events) && market.events.length > 0) {
+  const eventMeta = market.events[0]?.eventMetadata
+  if (eventMeta?.priceToBeat != null) {
+    priceToBeat = parseFloat(eventMeta.priceToBeat)
+  }
+}
+
+// Fall back to bestAsk if still null
+if (priceToBeat === null && market?.bestAsk != null) {
+  priceToBeat = parseFloat(market.bestAsk)
+}
 
     return NextResponse.json({
       id: market.id,

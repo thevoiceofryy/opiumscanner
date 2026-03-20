@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers'
 import Link from 'next/link'
 import { createServerClient } from '@supabase/ssr'
-import { TerminalLayout } from '@/components/terminal/terminal-layout'
+import { TerminalWrapper } from '@/components/terminal/terminal-wrapper'
 import { CheckoutButton } from '@/components/commerce/checkout-button'
 import { ClaimUnlock } from '@/components/commerce/claim-unlock'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -42,7 +42,7 @@ export default async function DashboardPage() {
 
   // OWNER OR PAID USER BYPASS
   if (user?.email === ownerEmail || paid) {
-    return <TerminalLayout />
+    return <TerminalWrapper />
   }
 
   return (
