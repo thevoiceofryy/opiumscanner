@@ -27,10 +27,10 @@ const selected = { label: '15m', value: '15m' as const, limit: 100 }
 export function TerminalLayout() {
   const btcPrice = useBTCPrice()
   const { chainlinkLive } = useTargetPriceWebSocket()
-  const {
+const {
     priceToBeat, probability, marketTitle,
     clobAskYes, clobAskNo, bookDepth, lastResult,
-    upRounds, downRounds, correctRounds, wrongRounds
+upRounds, downRounds, correctRounds, wrongRounds, resultsLog
   } = usePolymarketRound()
 
   const symbol = 'BTCUSDT'
@@ -168,6 +168,7 @@ export function TerminalLayout() {
               downRounds={downRounds}
               correctRounds={correctRounds}
               wrongRounds={wrongRounds}
+              resultsLog={resultsLog}
             />
           </div>
           <div className="flex-1 min-h-0 overflow-hidden">

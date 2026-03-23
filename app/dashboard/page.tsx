@@ -1,5 +1,11 @@
 import { TerminalWrapper } from '@/components/terminal/terminal-wrapper'
 
-export default async function DashboardPage() {
-  return <TerminalWrapper />
+export default function DashboardPage() {
+  return (
+    <div className="p-2">
+      {/* ✅ YOUR ACTUAL APP */}
+      <TerminalWrapper />
+
+    </div>
+  )
 }

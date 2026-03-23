@@ -21,6 +21,7 @@ interface SignalPanelProps {
   downRounds?: number
   correctRounds?: number
   wrongRounds?: number
+  resultsLog?: { bucket: number; result: 'UP' | 'DOWN'; predicted?: 'UP' | 'DOWN'; correct?: boolean; recordedAt: number }[]
 }
 
 function calcEV(trueProbability: number, askPrice: number): number {
@@ -40,16 +41,15 @@ export function SignalPanel({
   wrongRounds = 0,
   upRounds = 0,
   downRounds = 0,
+  resultsLog = [],
 }: SignalPanelProps) {
   const [remaining, setRemaining] = useState<number>(0)
+  const [showHistory, setShowHistory] = useState(false)
   const [riskAmount, setRiskAmount] = useState<number>(50)
   const [bankroll, setBankroll] = useState<number>(500)
   const [selectedSide, setSelectedSide] = useState<'YES' | 'NO'>('YES')
   const [collapsed, setCollapsed] = useState(false)
   const [useKelly, setUseKelly] = useState(true)
-const lastLoggedSignalRef = useRef<string | null>(null)
-const lastSentRef = useRef<number>(0)
-const lastSignalRef = useRef<string | null>(null)
 
   const confidence = marketPrices?.yes !== null ? Math.round(marketPrices.yes ?? 0) : 50
   const indicators = cryptoData?.indicators ?? null
@@ -71,29 +71,11 @@ const lastSignalRef = useRef<string | null>(null)
 
   const { buyVolumeRatio60s } = useOrderFlow()
 
-  useEffect(() => {
-    const update = () => {
-      const now = Date.now()
-      const bucketMs = 15 * 60 * 1000
-      const bucketEnd = (Math.floor(now / bucketMs) + 1) * bucketMs
-      setRemaining(Math.max(0, Math.floor((bucketEnd - now) / 1000)))
-    }
-    update()
-    const id = setInterval(update, 1000)
-    return () => clearInterval(id)
-  }, [])
+  const lockedDirectionRef = useRef<'UP' | 'DOWN' | null>(null)
+  const lockedBucketRef = useRef<number>(0)
+  const [lockedDirection, setLockedDirection] = useState<'UP' | 'DOWN' | null>(null)
 
-  useEffect(() => {
-    if (direction === 'UP') setSelectedSide('YES')
-    else if (direction === 'DOWN') setSelectedSide('NO')
-  }, [direction])
-
-  useEffect(() => {
-    if (useKelly && kellySuggestedBet > 0) {
-      setRiskAmount(Math.round(kellySuggestedBet))
-    }
-  }, [useKelly, kellySuggestedBet])
-
+  // ── ev must be defined before logPrediction which references it ──
   const ev = useMemo(() => {
     const yesAsk = clobAskYes ?? (confidence / 100)
     const noAsk = clobAskNo ?? (1 - (clobAskYes ?? confidence / 100))
@@ -114,67 +96,109 @@ const lastSignalRef = useRef<string | null>(null)
     return { trueProb, yesEV, noEV, bestSide, yesAsk, noAsk, yesEdge, noEdge, hasEdge }
   }, [trueProb, clobAskYes, clobAskNo, confidence])
 
-const logPrediction = useCallback(async () => {
-  const currentBucket = Math.floor(Date.now() / 1000 / 900) * 900
-  if (direction === 'NEUTRAL') return
+  // ── DEFINED FIRST — before any useEffect that calls it ──
+  const logPrediction = useCallback(async () => {
+    const dir = lockedDirectionRef.current
+    console.log('logPrediction called, ref:', dir)
+    if (!dir) {
+      console.log('EARLY RETURN — ref is null')
+      return
+    }
 
-  const signalKey = `${currentBucket}-${direction}-${Math.round(trueProb * 100)}`
+    const currentBucket = Math.floor(Date.now() / 1000 / 900) * 900
+      console.log('POSTING PREDICTION — bucket:', currentBucket, 'predicted:', dir) // ✅ ADD HERE
+    const payload = { bucket: currentBucket, predicted: dir }
+    console.log('SENDING PAYLOAD:', JSON.stringify(payload))
 
-  // ✅ prevent duplicate signals
-  if (lastSignalRef.current === signalKey) return
-  lastSignalRef.current = signalKey
+    try {
+      const res = await fetch('/api/polymarket/results', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const json = await res.json()
+      console.log('API RESPONSE:', json)
+    } catch (e) {
+      console.error('FETCH ERROR:', e)
+    }
 
-  // ✅ cooldown (30 sec)
-  const now = Date.now()
-  if (now - lastSentRef.current < 30000) return
-  lastSentRef.current = now
-
-  try {
-    await fetch('/api/polymarket/results', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bucket: currentBucket, predicted: direction }),
-    })
-  } catch {}
-
-  try {
-    const edge = direction === 'UP' ? ev.yesEdge : ev.noEdge
-    const prob = direction === 'UP'
-      ? Math.round(trueProb * 100)
-      : Math.round((1 - trueProb) * 100)
-
-    const ask = direction === 'UP'
-      ? Math.round((ev.yesAsk || 0) * 100)
-      : Math.round((ev.noAsk || 0) * 100)
-
-    const timeMin = Math.floor(remaining / 60)
-    const timeSec = remaining % 60
-
-    const message =
-      direction === 'UP'
+    try {
+      const edge = dir === 'UP' ? ev.yesEdge : ev.noEdge
+      const prob = dir === 'UP'
+        ? Math.round(trueProb * 100)
+        : Math.round((1 - trueProb) * 100)
+      const ask = dir === 'UP'
+        ? Math.round((ev.yesAsk || 0) * 100)
+        : Math.round((ev.noAsk || 0) * 100)
+      const timeMin = Math.floor(remaining / 60)
+      const timeSec = remaining % 60
+      const message = dir === 'UP'
         ? `🟢 <b>SIGNAL: YES (UP)</b>\nModel: ${prob}% | Market: ${ask}¢ | Edge: +${edge.toFixed(0)}%\nConfidence: ${modelConfidence}% | Time left: ${timeMin}:${String(timeSec).padStart(2, '0')}`
         : `🔴 <b>SIGNAL: NO (DOWN)</b>\nModel: ${prob}% | Market: ${ask}¢ | Edge: +${edge.toFixed(0)}%\nConfidence: ${modelConfidence}% | Time left: ${timeMin}:${String(timeSec).padStart(2, '0')}`
 
-    await fetch('/api/telegram', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message }),
-    })
-  } catch {}
-}, [direction, ev, trueProb, modelConfidence, remaining])
+      await fetch('/api/telegram', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message }),
+      })
+    } catch {}
+  }, []) // ✅ empty — only reads refs, never stale
 
-useEffect(() => {
-  if (
-    direction !== 'NEUTRAL' &&
-    modelConfidence >= 50 &&   // ⬆️ stronger filter
-    ev.hasEdge &&
-    remaining > 60
-  ) {
-    logPrediction()
-  }
-}, [direction, modelConfidence, ev.hasEdge, remaining])
+  // ── LOCK EFFECT — sets ref+state only, does NOT call logPrediction ──
+  useEffect(() => {
+    const currentBucket = Math.floor(Date.now() / 1000 / 900) * 900
+
+    if (lockedBucketRef.current !== currentBucket) {
+      lockedBucketRef.current = currentBucket
+      lockedDirectionRef.current = null
+      setLockedDirection(null)
+    }
+
+    if ((direction === 'UP' || direction === 'DOWN') && lockedDirectionRef.current === null) {
+      lockedDirectionRef.current = direction
+      setLockedDirection(direction)
+      console.log('LOCK SET — ref:', lockedDirectionRef.current)
+      setTimeout(() => logPrediction(), 0)
+      // ✅ NO logPrediction() call here
+    }
+  }, [direction, modelConfidence, remaining])
+
+
+
+  // ── TIMER ──
+  useEffect(() => {
+    const update = () => {
+      const now = Date.now()
+      const bucketMs = 15 * 60 * 1000
+      const bucketEnd = (Math.floor(now / bucketMs) + 1) * bucketMs
+      setRemaining(Math.max(0, Math.floor((bucketEnd - now) / 1000)))
+    }
+    update()
+    const id = setInterval(update, 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  useEffect(() => {
+    if (lockedDirection === 'UP') setSelectedSide('YES')
+    else if (lockedDirection === 'DOWN') setSelectedSide('NO')
+  }, [lockedDirection])
+
+  useEffect(() => {
+    if (useKelly && kellySuggestedBet > 0) {
+      setRiskAmount(Math.round(kellySuggestedBet))
+    }
+  }, [useKelly, kellySuggestedBet])
 
   const compositeSignal = useMemo(() => {
+      if (modelConfidence < 55 || convergenceScore < 50) {
+    return {
+      type: 'wait' as const,
+      side: null,
+      title: 'NO TRADE',
+      subtitle: 'LOW QUALITY SETUP',
+      message: `Confidence ${modelConfidence}% | Score ${convergenceScore} — skipping`,
+    }
+  }
     const distFromTarget = btcPrice && priceToBeat ? btcPrice - priceToBeat : 0
     const distStr = distFromTarget >= 0 ? `+$${distFromTarget.toFixed(0)}` : `-$${Math.abs(distFromTarget).toFixed(0)}`
 
@@ -224,9 +248,9 @@ useEffect(() => {
       return {
         type: 'entry' as const,
         side: ev.bestSide,
-        title: `${ev.bestSide} — ${sideProbPct}% ${direction}`,
+        title: `${ev.bestSide} — ${sideProbPct}% ${ev.bestSide === 'YES' ? 'UP' : 'DOWN'}`,
         subtitle: `+${edge.toFixed(0)}% EDGE`,
-        message: `Model: ${sideProbPct}% ${direction}. Market: ${Math.round((ev.bestSide === 'YES' ? ev.yesAsk : ev.noAsk) * 100)}¢. Edge: +${edge.toFixed(1)}%. ${distStr} from target.`,
+        message: `Model: ${sideProbPct}% ${ev.bestSide === 'YES' ? 'UP' : 'DOWN'}. Market: ${Math.round((ev.bestSide === 'YES' ? ev.yesAsk : ev.noAsk) * 100)}¢. Edge: +${edge.toFixed(1)}%. ${distStr} from target.`,
       }
     }
 
@@ -286,7 +310,10 @@ useEffect(() => {
       </div>
 
       {/* ═══ WIN / LOSS ═══ */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/30 bg-muted/5">
+      <div
+        className="flex items-center justify-between px-3 py-1.5 border-b border-border/30 bg-muted/5 cursor-pointer hover:bg-muted/10 transition-colors"
+        onClick={() => setShowHistory(true)}
+      >
         <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Record</span>
         <div className="flex items-center gap-3">
           <span className="text-[11px] font-bold text-bullish">{correctRounds}W</span>
@@ -299,8 +326,91 @@ useEffect(() => {
               {Math.round(correctRounds / (correctRounds + wrongRounds) * 100)}%
             </span>
           )}
+          <span className="text-[9px] text-muted-foreground">▶</span>
         </div>
       </div>
+
+      {/* ═══ HISTORY POPUP ═══ */}
+      {showHistory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => setShowHistory(false)}>
+          <div className="bg-[#0a0e14] border border-border/50 rounded-lg w-[420px] max-h-[80vh] overflow-hidden font-mono" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border/30">
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-bold text-foreground">Round History</span>
+                <span className="text-[10px] text-muted-foreground">{resultsLog.length} rounds</span>
+              </div>
+              <div className="flex items-center gap-4">
+                <span className="text-[11px] font-bold text-bullish">{correctRounds}W</span>
+                <span className="text-[10px] text-muted-foreground">/</span>
+                <span className="text-[11px] font-bold text-bearish">{wrongRounds}L</span>
+                {correctRounds + wrongRounds > 0 && (
+                  <span className={`text-[11px] font-bold ${
+                    Math.round(correctRounds / (correctRounds + wrongRounds) * 100) >= 55 ? 'text-bullish' : 'text-bearish'
+                  }`}>
+                    {Math.round(correctRounds / (correctRounds + wrongRounds) * 100)}%
+                  </span>
+                )}
+                <button onClick={() => setShowHistory(false)} className="text-muted-foreground hover:text-foreground ml-2">✕</button>
+              </div>
+            </div>
+
+            {(() => {
+              let streak = 0
+              let streakType: 'W' | 'L' | null = null
+              for (const r of [...resultsLog].reverse()) {
+                if (r.correct === true) {
+                  if (streakType === null || streakType === 'W') { streak++; streakType = 'W' }
+                  else break
+                } else if (r.correct === false) {
+                  if (streakType === null || streakType === 'L') { streak++; streakType = 'L' }
+                  else break
+                } else break
+              }
+              if (streak > 1) return (
+                <div className={`px-4 py-2 text-[10px] font-semibold border-b border-border/30 ${streakType === 'W' ? 'text-bullish bg-bullish/5' : 'text-bearish bg-bearish/5'}`}>
+                  {streakType === 'W' ? '🔥' : '❄️'} {streak} round {streakType === 'W' ? 'WIN' : 'LOSS'} streak
+                </div>
+              )
+              return null
+            })()}
+
+            <div className="overflow-y-auto max-h-[60vh]">
+              {resultsLog.length === 0 ? (
+                <div className="px-4 py-8 text-center text-muted-foreground text-[11px]">No rounds logged yet</div>
+              ) : (
+                [...resultsLog].reverse().slice(0, 30).map((r, i) => {
+                  const time = new Date(r.recordedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+                  const hasPrediction = r.predicted != null
+                  return (
+                    <div key={i} className={`flex items-center justify-between px-4 py-2 border-b border-border/20 ${i % 2 === 0 ? 'bg-muted/5' : ''}`}>
+                      <div className="flex items-center gap-3">
+                        <span className="text-[9px] text-muted-foreground w-16">{time}</span>
+                        <span className={`text-[10px] font-bold w-12 ${r.result === 'UP' ? 'text-bullish' : 'text-bearish'}`}>
+                          {r.result === 'UP' ? '▲ UP' : '▼ DOWN'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {hasPrediction ? (
+                          <>
+                            <span className={`text-[9px] ${r.predicted === 'UP' ? 'text-bullish' : 'text-bearish'}`}>
+                              pred: {r.predicted === 'UP' ? '▲' : '▼'}
+                            </span>
+                            <span className="text-[12px]">
+                              {r.correct === true ? '✅' : r.correct === false ? '❌' : '⏳'}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-[9px] text-muted-foreground">no prediction</span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ═══ PROBABILITY MODEL ═══ */}
       <div className="px-3 py-2 border-b border-border/30">
@@ -332,7 +442,7 @@ useEffect(() => {
               <div className="text-[10px] text-muted-foreground">model</div>
             </div>
             <div className="mt-1 flex items-center justify-between">
-              <span className="text-[9px] text-muted-foreground">mkt {Math.round((ev.yesAsk || 0) * 100)}¢</span>
+              <span className="text-[9px] text-muted-foreground">MIKT {Math.round((ev.yesAsk || 0) * 100)}¢</span>
               <span className={`text-[10px] font-semibold ${ev.yesEV > 0 ? 'text-bullish' : 'text-bearish'}`}>
                 {ev.yesEV > 0 ? '+' : ''}{ev.yesEdge.toFixed(0)}% edge
               </span>
@@ -346,7 +456,7 @@ useEffect(() => {
               <div className="text-[10px] text-muted-foreground">model</div>
             </div>
             <div className="mt-1 flex items-center justify-between">
-              <span className="text-[9px] text-muted-foreground">mkt {Math.round((ev.noAsk || 0) * 100)}¢</span>
+              <span className="text-[9px] text-muted-foreground">MIKT {Math.round((ev.noAsk || 0) * 100)}¢</span>
               <span className={`text-[10px] font-semibold ${ev.noEV > 0 ? 'text-bullish' : 'text-bearish'}`}>
                 {ev.noEV > 0 ? '+' : ''}{ev.noEdge.toFixed(0)}% edge
               </span>
@@ -361,7 +471,6 @@ useEffect(() => {
           <Zap className="w-3 h-3 text-warning" />
           <span className="text-[10px] text-muted-foreground uppercase">Signal</span>
         </div>
-
         <div className={`p-3 rounded border ${signalBorderBg}`}>
           <div className="flex items-center gap-2 mb-1">
             {compositeSignal.type === 'entry' ? (
@@ -371,9 +480,7 @@ useEffect(() => {
             ) : compositeSignal.type === 'warning' ? (
               <AlertTriangle className="w-4 h-4 text-warning" />
             ) : null}
-            <span className={`text-sm font-bold ${signalTitleColor}`}>
-              {compositeSignal.title}
-            </span>
+            <span className={`text-sm font-bold ${signalTitleColor}`}>{compositeSignal.title}</span>
           </div>
           <div className="text-[9px] text-muted-foreground mb-1">{compositeSignal.subtitle}</div>
           <div className="text-[10px] text-muted-foreground">{compositeSignal.message}</div>
@@ -386,7 +493,6 @@ useEffect(() => {
           <Activity className="w-3 h-3 text-info" />
           <span className="text-[10px] text-muted-foreground uppercase">Model Inputs</span>
         </div>
-
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="text-[9px] text-muted-foreground">PRICE vs TARGET</span>
@@ -396,28 +502,24 @@ useEffect(() => {
               {priceToBeat > 0 ? `${btcPrice > priceToBeat ? '+' : ''}${(btcPrice - priceToBeat).toFixed(0)} (${((btcPrice - priceToBeat) / priceToBeat * 100).toFixed(2)}%)` : '--'}
             </span>
           </div>
-
           <div className="flex items-center justify-between">
             <span className="text-[9px] text-muted-foreground">VOLATILITY</span>
             <span className={`text-[10px] ${
               volatilityRegime === 'HIGH' ? 'text-warning' : volatilityRegime === 'LOW' ? 'text-bullish' : 'text-foreground'
             }`}>{volatilityRegime}</span>
           </div>
-
           <div className="flex items-center justify-between">
             <span className="text-[9px] text-muted-foreground">ORDER FLOW (60s)</span>
             <span className={`text-[10px] ${
               buyVolumeRatio60s >= 0.55 ? 'text-bullish' : buyVolumeRatio60s <= 0.45 ? 'text-bearish' : 'text-muted-foreground'
             }`}>{Math.round(buyVolumeRatio60s * 100)}% buy</span>
           </div>
-
           <div className="flex items-center justify-between">
             <span className="text-[9px] text-muted-foreground">PUSH</span>
             <span className={`text-[10px] ${
               (driftBps ?? 0) > 1 ? 'text-bullish' : (driftBps ?? 0) < -1 ? 'text-bearish' : 'text-muted-foreground'
             }`}>{(driftBps ?? 0) > 0 ? '+' : ''}{(driftBps ?? 0).toFixed(1)} bps</span>
           </div>
-
           <div className="flex items-center justify-between">
             <span className="text-[9px] text-muted-foreground">CONFIDENCE</span>
             <span className="text-[10px] text-foreground">{modelConfidence ?? 0}%</span>
@@ -444,7 +546,6 @@ useEffect(() => {
               {(bookPressure ?? 0) > 0.2 ? 'BID HEAVY' : (bookPressure ?? 0) < -0.2 ? 'ASK HEAVY' : 'BALANCED'}
             </span>
           </div>
-
           <div className="flex gap-0.5 mb-2">
             <div className="flex-1 h-5 bg-bullish/20 rounded-l flex items-center justify-start pl-1">
               <span className="text-[9px] text-bullish font-semibold">{bookDepth.upBidDepth}</span>
@@ -454,13 +555,13 @@ useEffect(() => {
             </div>
           </div>
           <div className="flex justify-between text-[9px] text-muted-foreground">
-            <span>Bid depth</span>
-            <span>Spread: {bookDepth.upSpread !== null ? `${(bookDepth.upSpread * 100).toFixed(1)}¢` : '--'}</span>
-            <span>Ask depth</span>
+            <span>BID DEPT</span>
+            <span>SPREAD: {bookDepth.upSpread !== null ? `${(bookDepth.upSpread * 100).toFixed(1)}¢` : '--'}</span>
+            <span>ASK DEPT</span>
           </div>
           <div className="flex justify-between text-[9px] text-muted-foreground mt-1">
-            <span>Tight bid: {bookDepth.upBidDepth5}</span>
-            <span>Tight ask: {bookDepth.upAskDepth5}</span>
+            <span>TIGHT BID: {bookDepth.upBidDepth5}</span>
+            <span>TIGHT ASK: {bookDepth.upAskDepth5}</span>
           </div>
         </div>
       )}
@@ -474,8 +575,7 @@ useEffect(() => {
           </div>
           <div className="p-2 rounded border border-info/50 bg-info/5">
             <span className="text-[10px] text-info">
-              Sharp move detected — expecting snap-back {meanReversionDir}.
-              Price likely to revert toward target.
+              Sharp move detected — expecting snap-back {meanReversionDir}. Price likely to revert toward target.
             </span>
           </div>
         </div>
@@ -554,15 +654,12 @@ useEffect(() => {
               />
             </div>
           </div>
-
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground">{useKelly ? 'BEST BET' : 'Risk $'}</span>
             {useKelly ? (
               <span className={`font-bold ${kellySuggestedBet > 0 ? 'text-info' : 'text-muted-foreground'}`}>
                 ${kellySuggestedBet > 0 ? kellySuggestedBet.toFixed(0) : '0'}
-                <span className="text-[9px] text-muted-foreground ml-1">
-                  ({(kellyFraction * 100).toFixed(1)}%)
-                </span>
+                <span className="text-[9px] text-muted-foreground ml-1">({(kellyFraction * 100).toFixed(1)}%)</span>
               </span>
             ) : (
               <div className="flex items-center gap-1">
@@ -574,19 +671,16 @@ useEffect(() => {
               </div>
             )}
           </div>
-
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground">SHARES</span>
             <span className={`font-bold ${selectedSide === 'YES' ? 'text-bullish' : 'text-bearish'}`}>
               {shares.toFixed(1)} {selectedSide}
             </span>
           </div>
-
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground">PAYOUT</span>
             <span className="text-bullish font-bold">${shares.toFixed(0)}</span>
           </div>
-
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground">EXPECTED VALUE</span>
             <span className={`font-bold ${

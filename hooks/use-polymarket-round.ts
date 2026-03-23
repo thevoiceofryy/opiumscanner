@@ -19,7 +19,7 @@ export function usePolymarketRound() {
   const [marketTitle, setMarketTitle] = useState("Initializing...")
   const [priceToBeat, setPriceToBeat] = useState(0)
   const [probability, setProbability] = useState(50)
-
+const [currentPrediction, setCurrentPrediction] = useState<'UP' | 'DOWN' | null>(null)
   const [clobAskYes, setClobAskYes] = useState<number | null>(null)
   const [clobAskNo, setClobAskNo] = useState<number | null>(null)
 
@@ -154,18 +154,23 @@ export function usePolymarketRound() {
         const rawYesAsk = data?.clob?.up?.bestAsk
         const rawNoAsk = data?.clob?.down?.bestAsk
 
-        const yesValid =
-          typeof rawYesAsk === 'number' &&
-          rawYesAsk >= 0.01 &&
-          rawYesAsk <= 0.99
+const yesValid =
+  typeof rawYesAsk === 'number' &&
+  rawYesAsk >= 0.30 &&
+  rawYesAsk <= 0.70
 
-        const noValid =
-          typeof rawNoAsk === 'number' &&
-          rawNoAsk >= 0.01 &&
-          rawNoAsk <= 0.99
+const noValid =
+  typeof rawNoAsk === 'number' &&
+  rawNoAsk >= 0.30 &&
+  rawNoAsk <= 0.70
 
-        setClobAskYes(yesValid ? rawYesAsk : null)
-        setClobAskNo(noValid ? rawNoAsk : null)
+const bothValid =
+  yesValid &&
+  noValid &&
+  Math.abs((rawYesAsk + rawNoAsk) - 1.0) <= 0.05
+
+setClobAskYes(bothValid ? rawYesAsk : null)
+setClobAskNo(bothValid ? rawNoAsk : null)
 
         // Orderbook depth data
         setBookDepth({
@@ -183,18 +188,13 @@ export function usePolymarketRound() {
           downAskDepth5: data?.clob?.down?.askDepth5pct ?? 0,
         })
 
-        console.log('CLOB PRICES', {
-          yes: rawYesAsk,
-          no: rawNoAsk
-        })
-
         if (data.lastRound) {
           setLastResult(data.lastRound.result || 'UNKNOWN')
         }
 
         if (data.lastRound && data.lastRound.result !== 'UNKNOWN') {
 
-          const bucketKey = Number(data.lastRound.bucket)
+const bucketKey = data.lastRound.bucket
 
           if (lastPostedBucketRef.current !== bucketKey) {
 
@@ -203,27 +203,27 @@ export function usePolymarketRound() {
             const result = data.lastRound.result as RoundResult
 
             try {
+              
+console.log('POSTING RESULT — bucket:', bucketKey, 'result:', result)
+const resultRes = await fetch('/api/polymarket/results', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    bucket: bucketKey,
+    result
+  })
+})
 
-              const res = await fetch('/api/polymarket/results', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  bucket: bucketKey,
-                  result
-                })
-              })
 
-              if (res.ok) {
+if (resultRes.ok) {
+  const global = await resultRes.json()
 
-                const global = await res.json()
-
-                setUpRounds(global.upRounds ?? 0)
-                setDownRounds(global.downRounds ?? 0)
-                setCorrectRounds(global.correctRounds ?? 0)
-                setWrongRounds(global.wrongRounds ?? 0)
-                setResultsLog(global.resultsLog ?? [])
-
-              }
+  setUpRounds(global.upRounds ?? 0)
+  setDownRounds(global.downRounds ?? 0)
+  setCorrectRounds(global.correctRounds ?? 0)
+  setWrongRounds(global.wrongRounds ?? 0)
+  setResultsLog(global.resultsLog ?? [])
+}
 
             } catch {}
 

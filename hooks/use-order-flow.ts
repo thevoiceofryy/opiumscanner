@@ -19,14 +19,12 @@ interface OrderFlowStats {
   buyVolumeRatio10s: number
   totalVolume60s: number
   largeTradeThreshold: number
+  aggression: number
+  absorption: number // 🔥 NEW
 }
 
 const MAX_TRADES = 500
 
-/**
- * Reads real trades from the shared Binance aggTrade WebSocket.
- * No second connection — piggybacks on useBTCPrice's stream.
- */
 export function useOrderFlow(): OrderFlowStats {
   const [trades, setTrades] = useState<OrderFlowTrade[]>([])
   const mountedRef = useRef(true)
@@ -48,7 +46,6 @@ export function useOrderFlow(): OrderFlowStats {
     }
   }, [])
 
-  // Compute stats
   const now = Date.now()
   const cutoff60 = now - 60_000
   const cutoff10 = now - 10_000
@@ -57,20 +54,68 @@ export function useOrderFlow(): OrderFlowStats {
   let buyVol10 = 0, totalVol10 = 0
   const sizes: number[] = []
 
+  let aggressiveBuyVol = 0
+  let aggressiveSellVol = 0
+  let prevPrice: number | null = null
+
+  let flatVolume = 0
+
+  // ── PASS 1: collect sizes ──
+  for (const t of trades) {
+    if (t.ts >= cutoff60) {
+      sizes.push(t.size)
+    }
+  }
+
+  sizes.sort((a, b) => a - b)
+  const largeTradeThreshold =
+    sizes.length > 10
+      ? sizes[Math.floor(sizes.length * 0.9)]
+      : 0.5
+
+  // ── PASS 2: compute volumes + aggression + absorption ──
   for (const t of trades) {
     if (t.ts >= cutoff60) {
       totalVol60 += t.size
-      if (t.side === 'BUY') buyVol60 += t.size
-      sizes.push(t.size)
+
+      let size = t.size
+
+      if (t.size > largeTradeThreshold) {
+        size = t.size * 1.5
+      }
+
+      if (t.side === 'BUY') buyVol60 += size
+      else buyVol60 -= size * 0.5
+
+      // 🔥 AGGRESSION + ABSORPTION
+      if (prevPrice !== null) {
+        if (t.price > prevPrice) {
+          aggressiveBuyVol += size
+        } else if (t.price < prevPrice) {
+          aggressiveSellVol += size
+        } else {
+          flatVolume += size
+        }
+      }
+
+      prevPrice = t.price
     }
+
     if (t.ts >= cutoff10) {
       totalVol10 += t.size
       if (t.side === 'BUY') buyVol10 += t.size
     }
   }
 
-  sizes.sort((a, b) => a - b)
-  const largeTradeThreshold = sizes.length > 10 ? sizes[Math.floor(sizes.length * 0.9)] : 0.5
+  const aggression =
+    aggressiveBuyVol + aggressiveSellVol > 0
+      ? aggressiveBuyVol / (aggressiveBuyVol + aggressiveSellVol)
+      : 0.5
+
+  const absorption =
+    totalVol60 > 0
+      ? Math.min(1, flatVolume / totalVol60)
+      : 0
 
   return {
     trades,
@@ -78,5 +123,7 @@ export function useOrderFlow(): OrderFlowStats {
     buyVolumeRatio10s: totalVol10 > 0 ? Math.min(1, buyVol10 / totalVol10) : 0.5,
     totalVolume60s: totalVol60,
     largeTradeThreshold,
+    aggression,
+    absorption, // 🔥 IMPORTANT
   }
 }
