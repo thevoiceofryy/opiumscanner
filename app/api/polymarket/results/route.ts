@@ -36,13 +36,23 @@ export async function POST(request: Request) {
   if (!result && !predicted) return NextResponse.json({ error: 'Missing result or predicted' }, { status: 400 })
 
 // 🟢 CASE 1: save prediction only (during round)
+// AFTER — only write if no prediction exists yet for this bucket
 if (predicted && !result) {
-  await supabase
+  const { data: existingPred } = await supabase
     .from('round_results')
-    .upsert(
-      { bucket, predicted, recorded_at: new Date().toISOString() },
-      { onConflict: 'bucket' }
-    )
+    .select('predicted')
+    .eq('bucket', bucket)
+    .maybeSingle()
+
+  if (!existingPred?.predicted) {
+    await supabase
+      .from('round_results')
+      .upsert(
+        { bucket, predicted, recorded_at: new Date().toISOString() },
+        { onConflict: 'bucket' }
+      )
+  }
+
   return NextResponse.json({ success: true, type: 'prediction' })
 }
 

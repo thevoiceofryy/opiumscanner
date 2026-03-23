@@ -60,7 +60,7 @@ export function MarketSearch({
         </div>
 
         {/* Results */}
-        <div className="max-h-[500px] overflow-y-auto">
+        <div className="max-h-[500px] overflow-hidden">
 
           {isLoading && (
             <div className="p-4 text-sm text-muted-foreground">

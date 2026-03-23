@@ -44,7 +44,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
-      <body className={`${jetbrainsMono.variable} font-mono antialiased bg-background text-foreground`}>
+<body className={`${jetbrainsMono.variable} font-mono antialiased bg-background text-foreground h-screen overflow-hidden`}>
         {children}
         <Analytics />
       </body>

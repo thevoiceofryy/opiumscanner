@@ -13,6 +13,8 @@ interface SignalPanelProps {
   selectedMarket: string | null
   priceToBeat: number
   btcPrice: number
+  bias?: 'UP' | 'DOWN' | 'NEUTRAL'
+  diffPct?: number
   clobAskYes?: number | null
   clobAskNo?: number | null
   bookDepth?: BookDepthData
@@ -21,7 +23,7 @@ interface SignalPanelProps {
   downRounds?: number
   correctRounds?: number
   wrongRounds?: number
-  resultsLog?: { bucket: number; result: 'UP' | 'DOWN'; predicted?: 'UP' | 'DOWN'; correct?: boolean; recordedAt: number }[]
+  resultsLog?: any[]
 }
 
 function calcEV(trueProbability: number, askPrice: number): number {
@@ -34,6 +36,8 @@ export function SignalPanel({
   marketPrices,
   priceToBeat,
   btcPrice,
+  bias,
+  diffPct,
   clobAskYes = null,
   clobAskNo = null,
   bookDepth,
@@ -71,9 +75,17 @@ export function SignalPanel({
 
   const { buyVolumeRatio60s } = useOrderFlow()
 
+
+
+
   const lockedDirectionRef = useRef<'UP' | 'DOWN' | null>(null)
   const lockedBucketRef = useRef<number>(0)
   const [lockedDirection, setLockedDirection] = useState<'UP' | 'DOWN' | null>(null)
+
+
+
+
+
 
   // ── ev must be defined before logPrediction which references it ──
   const ev = useMemo(() => {
@@ -95,21 +107,23 @@ export function SignalPanel({
 
     return { trueProb, yesEV, noEV, bestSide, yesAsk, noAsk, yesEdge, noEdge, hasEdge }
   }, [trueProb, clobAskYes, clobAskNo, confidence])
+const evRef = useRef(ev)
+  const trueProbRef = useRef(trueProb)
+  const modelConfidenceRef = useRef(modelConfidence)
+  const remainingRef = useRef(remaining)
 
+  useEffect(() => { evRef.current = ev }, [ev])
+  useEffect(() => { trueProbRef.current = trueProb }, [trueProb])
+  useEffect(() => { modelConfidenceRef.current = modelConfidence }, [modelConfidence])
+  useEffect(() => { remainingRef.current = remaining }, [remaining])
   // ── DEFINED FIRST — before any useEffect that calls it ──
-  const logPrediction = useCallback(async () => {
+const logPrediction = useCallback(async () => {
     const dir = lockedDirectionRef.current
-    console.log('logPrediction called, ref:', dir)
-    if (!dir) {
-      console.log('EARLY RETURN — ref is null')
-      return
-    }
-
+    if (!dir) return
+ 
     const currentBucket = Math.floor(Date.now() / 1000 / 900) * 900
-      console.log('POSTING PREDICTION — bucket:', currentBucket, 'predicted:', dir) // ✅ ADD HERE
     const payload = { bucket: currentBucket, predicted: dir }
-    console.log('SENDING PAYLOAD:', JSON.stringify(payload))
-
+ 
     try {
       const res = await fetch('/api/polymarket/results', {
         method: 'POST',
@@ -121,21 +135,27 @@ export function SignalPanel({
     } catch (e) {
       console.error('FETCH ERROR:', e)
     }
-
+ 
     try {
-      const edge = dir === 'UP' ? ev.yesEdge : ev.noEdge
+      // ✅ Now reads from refs instead of stale closure values
+      const currentEv = evRef.current
+      const currentTrueProb = trueProbRef.current
+      const currentConfidence = modelConfidenceRef.current
+      const currentRemaining = remainingRef.current
+ 
+      const edge = dir === 'UP' ? currentEv.yesEdge : currentEv.noEdge
       const prob = dir === 'UP'
-        ? Math.round(trueProb * 100)
-        : Math.round((1 - trueProb) * 100)
+        ? Math.round(currentTrueProb * 100)
+        : Math.round((1 - currentTrueProb) * 100)
       const ask = dir === 'UP'
-        ? Math.round((ev.yesAsk || 0) * 100)
-        : Math.round((ev.noAsk || 0) * 100)
-      const timeMin = Math.floor(remaining / 60)
-      const timeSec = remaining % 60
+        ? Math.round((currentEv.yesAsk || 0) * 100)
+        : Math.round((currentEv.noAsk || 0) * 100)
+      const timeMin = Math.floor(currentRemaining / 60)
+      const timeSec = currentRemaining % 60
       const message = dir === 'UP'
-        ? `🟢 <b>SIGNAL: YES (UP)</b>\nModel: ${prob}% | Market: ${ask}¢ | Edge: +${edge.toFixed(0)}%\nConfidence: ${modelConfidence}% | Time left: ${timeMin}:${String(timeSec).padStart(2, '0')}`
-        : `🔴 <b>SIGNAL: NO (DOWN)</b>\nModel: ${prob}% | Market: ${ask}¢ | Edge: +${edge.toFixed(0)}%\nConfidence: ${modelConfidence}% | Time left: ${timeMin}:${String(timeSec).padStart(2, '0')}`
-
+        ? `🟢 <b>SIGNAL: YES (UP)</b>\nModel: ${prob}% | Market: ${ask}¢ | Edge: +${edge.toFixed(0)}%\nConfidence: ${currentConfidence}% | Time left: ${timeMin}:${String(timeSec).padStart(2, '0')}`
+        : `🔴 <b>SIGNAL: NO (DOWN)</b>\nModel: ${prob}% | Market: ${ask}¢ | Edge: +${edge.toFixed(0)}%\nConfidence: ${currentConfidence}% | Time left: ${timeMin}:${String(timeSec).padStart(2, '0')}`
+ 
       await fetch('/api/telegram', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -154,9 +174,9 @@ export function SignalPanel({
       setLockedDirection(null)
     }
 
-    if ((direction === 'UP' || direction === 'DOWN') && lockedDirectionRef.current === null) {
-      lockedDirectionRef.current = direction
-      setLockedDirection(direction)
+if ((direction === 'UP' || direction === 'DOWN') && lockedDirectionRef.current === null && modelConfidence >= 50 && convergenceScore >= 20) {
+  lockedDirectionRef.current = direction
+  setLockedDirection(direction)
       console.log('LOCK SET — ref:', lockedDirectionRef.current)
       setTimeout(() => logPrediction(), 0)
       // ✅ NO logPrediction() call here
@@ -190,7 +210,21 @@ export function SignalPanel({
   }, [useKelly, kellySuggestedBet])
 
   const compositeSignal = useMemo(() => {
-      if (modelConfidence < 55 || convergenceScore < 50) {
+
+  if (lockedDirection !== null) {
+    const side = lockedDirection === 'UP' ? 'YES' : 'NO'
+    const edge = side === 'YES' ? ev.yesEdge : ev.noEdge
+    const prob = side === 'YES' ? Math.round(trueProb * 100) : Math.round((1 - trueProb) * 100)
+    return {
+      type: 'entry' as const,
+      side,
+      title: `${side} — ${prob}%`,
+      subtitle: `+${edge.toFixed(0)}% EDGE`,
+      message: `Confidence ${modelConfidence}% | Score ${convergenceScore}`,
+    }
+  }
+
+if (modelConfidence < 30 || (convergenceScore < 8 && Math.abs(diffPct ?? 0) < 0.03)) {
     return {
       type: 'wait' as const,
       side: null,
@@ -232,36 +266,86 @@ export function SignalPanel({
         }
       }
     }
+// ===== SMART FILTER =====
 
-    if (!ev.hasEdge) {
-      return {
-        type: 'wait' as const,
-        side: null as 'YES' | 'NO' | null,
-        title: `${direction} ${Math.round(trueProb * 100)}% YES — NO EDGE`,
-        subtitle: volatilityRegime === 'HIGH' ? 'HIGH VOL' : 'FAIR PRICE',
-        message: `Model says ${Math.round(trueProb * 100)}% YES but market is fairly priced. ${distStr} from target.`,
-      }
-    }
+// no direction
+if (!bias || bias === 'NEUTRAL') {
+  return {
+    type: 'wait' as const,
+    side: null,
+    title: 'NO TRADE',
+    subtitle: 'NO DIRECTION',
+    message: `No clear move from PTB`,
+  }
+}
 
-    if (ev.bestSide && ev.hasEdge && modelConfidence >= 40) {
-      const edge = ev.bestSide === 'YES' ? ev.yesEdge : ev.noEdge
-      return {
-        type: 'entry' as const,
-        side: ev.bestSide,
-        title: `${ev.bestSide} — ${sideProbPct}% ${ev.bestSide === 'YES' ? 'UP' : 'DOWN'}`,
-        subtitle: `+${edge.toFixed(0)}% EDGE`,
-        message: `Model: ${sideProbPct}% ${ev.bestSide === 'YES' ? 'UP' : 'DOWN'}. Market: ${Math.round((ev.bestSide === 'YES' ? ev.yesAsk : ev.noAsk) * 100)}¢. Edge: +${edge.toFixed(1)}%. ${distStr} from target.`,
-      }
-    }
+// weak move
+if (Math.abs(diffPct ?? 0) < 0.05) {
+  return {
+    type: 'wait' as const,
+    side: null,
+    title: 'WEAK MOVE',
+    subtitle: 'LOW MOMENTUM',
+    message: `Δ too small (${diffPct?.toFixed(2)}%)`,
+  }
+}
 
-    return {
-      type: 'warning' as const,
-      side: null as 'YES' | 'NO' | null,
-      title: `WEAK ${direction} ${Math.round(trueProb * 100)}% YES`,
-      subtitle: 'LOW CONFIDENCE',
-      message: `Signal detected but confidence ${modelConfidence}%. ${distStr} from target. Vol: ${volatilityRegime}.`,
-    }
-  }, [direction, trueProb, ev, modelConfidence, volatilityRegime, btcPrice, priceToBeat, meanReversionActive, meanReversionDir])
+// ❗ KEEP THIS (edge check)
+if (!ev.hasEdge) {
+  return {
+    type: 'wait',
+    side: null,
+    title: 'NO EDGE',
+    subtitle: 'MARKET FAIR',
+    message: `No pricing advantage`,
+  }
+}
+
+// alignment
+if (ev.bestSide === 'YES' && bias !== 'UP') {
+  return {
+    type: 'wait' as const,
+    side: null,
+    title: 'CONFLICT',
+    subtitle: 'MODEL vs PRICE',
+    message: `Model YES but price below PTB`,
+  }
+}
+
+if (ev.bestSide === 'NO' && bias !== 'DOWN') {
+  return {
+    type: 'wait' as const,
+    side: null,
+    title: 'CONFLICT',
+    subtitle: 'MODEL vs PRICE',
+    message: `Model NO but price above PTB`,
+  }
+}
+
+// ✅ FINAL ENTRY
+// NEW — fires on alignment alone, edge is a bonus label
+if (ev.bestSide && modelConfidence >= 35) {
+  const edgeLabel = ev.hasEdge ? `+${(ev.bestSide === 'YES' ? ev.yesEdge : ev.noEdge).toFixed(0)}% EDGE` : 'WEAK EDGE'
+  return {
+    type: 'entry' as const,
+    side: ev.bestSide,
+    title: `${ev.bestSide} — ${sideProbPct}%`,
+    subtitle: edgeLabel,
+    message: `Confidence ${modelConfidence}% | Score ${convergenceScore}`,
+  }
+}
+
+// fallback
+return {
+  type: 'wait' as const,
+  side: null,
+  title: 'NO TRADE',
+  subtitle: 'NO VALID SETUP',
+  message: 'Conditions not met',
+}
+
+
+}, [direction, trueProb, ev, modelConfidence, volatilityRegime, btcPrice, priceToBeat, meanReversionActive, meanReversionDir, bias, diffPct, lockedDirection])
 
   const accuracy = useMemo(() => {
     const total = correctRounds + wrongRounds
@@ -301,116 +385,13 @@ export function SignalPanel({
   }
 
   return (
-    <div className="flex flex-col bg-card/50 backdrop-blur-sm text-xs font-mono overflow-y-auto">
+    <div className="flex flex-col bg-card/50 backdrop-blur-sm text-xs font-mono overflow-hidden">
       {/* Collapse */}
       <div className="flex justify-end p-1">
         <button onClick={() => setCollapsed(true)} className="p-1 hover:bg-muted/20 rounded transition-colors">
           <ChevronRight className="w-4 h-4 text-muted-foreground rotate-180" />
         </button>
       </div>
-
-      {/* ═══ WIN / LOSS ═══ */}
-      <div
-        className="flex items-center justify-between px-3 py-1.5 border-b border-border/30 bg-muted/5 cursor-pointer hover:bg-muted/10 transition-colors"
-        onClick={() => setShowHistory(true)}
-      >
-        <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Record</span>
-        <div className="flex items-center gap-3">
-          <span className="text-[11px] font-bold text-bullish">{correctRounds}W</span>
-          <span className="text-[10px] text-muted-foreground">/</span>
-          <span className="text-[11px] font-bold text-bearish">{wrongRounds}L</span>
-          {correctRounds + wrongRounds > 0 && (
-            <span className={`text-[10px] font-semibold ${
-              Math.round(correctRounds / (correctRounds + wrongRounds) * 100) >= 55 ? 'text-bullish' : 'text-bearish'
-            }`}>
-              {Math.round(correctRounds / (correctRounds + wrongRounds) * 100)}%
-            </span>
-          )}
-          <span className="text-[9px] text-muted-foreground">▶</span>
-        </div>
-      </div>
-
-      {/* ═══ HISTORY POPUP ═══ */}
-      {showHistory && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => setShowHistory(false)}>
-          <div className="bg-[#0a0e14] border border-border/50 rounded-lg w-[420px] max-h-[80vh] overflow-hidden font-mono" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border/30">
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-bold text-foreground">Round History</span>
-                <span className="text-[10px] text-muted-foreground">{resultsLog.length} rounds</span>
-              </div>
-              <div className="flex items-center gap-4">
-                <span className="text-[11px] font-bold text-bullish">{correctRounds}W</span>
-                <span className="text-[10px] text-muted-foreground">/</span>
-                <span className="text-[11px] font-bold text-bearish">{wrongRounds}L</span>
-                {correctRounds + wrongRounds > 0 && (
-                  <span className={`text-[11px] font-bold ${
-                    Math.round(correctRounds / (correctRounds + wrongRounds) * 100) >= 55 ? 'text-bullish' : 'text-bearish'
-                  }`}>
-                    {Math.round(correctRounds / (correctRounds + wrongRounds) * 100)}%
-                  </span>
-                )}
-                <button onClick={() => setShowHistory(false)} className="text-muted-foreground hover:text-foreground ml-2">✕</button>
-              </div>
-            </div>
-
-            {(() => {
-              let streak = 0
-              let streakType: 'W' | 'L' | null = null
-              for (const r of [...resultsLog].reverse()) {
-                if (r.correct === true) {
-                  if (streakType === null || streakType === 'W') { streak++; streakType = 'W' }
-                  else break
-                } else if (r.correct === false) {
-                  if (streakType === null || streakType === 'L') { streak++; streakType = 'L' }
-                  else break
-                } else break
-              }
-              if (streak > 1) return (
-                <div className={`px-4 py-2 text-[10px] font-semibold border-b border-border/30 ${streakType === 'W' ? 'text-bullish bg-bullish/5' : 'text-bearish bg-bearish/5'}`}>
-                  {streakType === 'W' ? '🔥' : '❄️'} {streak} round {streakType === 'W' ? 'WIN' : 'LOSS'} streak
-                </div>
-              )
-              return null
-            })()}
-
-            <div className="overflow-y-auto max-h-[60vh]">
-              {resultsLog.length === 0 ? (
-                <div className="px-4 py-8 text-center text-muted-foreground text-[11px]">No rounds logged yet</div>
-              ) : (
-                [...resultsLog].reverse().slice(0, 30).map((r, i) => {
-                  const time = new Date(r.recordedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
-                  const hasPrediction = r.predicted != null
-                  return (
-                    <div key={i} className={`flex items-center justify-between px-4 py-2 border-b border-border/20 ${i % 2 === 0 ? 'bg-muted/5' : ''}`}>
-                      <div className="flex items-center gap-3">
-                        <span className="text-[9px] text-muted-foreground w-16">{time}</span>
-                        <span className={`text-[10px] font-bold w-12 ${r.result === 'UP' ? 'text-bullish' : 'text-bearish'}`}>
-                          {r.result === 'UP' ? '▲ UP' : '▼ DOWN'}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        {hasPrediction ? (
-                          <>
-                            <span className={`text-[9px] ${r.predicted === 'UP' ? 'text-bullish' : 'text-bearish'}`}>
-                              pred: {r.predicted === 'UP' ? '▲' : '▼'}
-                            </span>
-                            <span className="text-[12px]">
-                              {r.correct === true ? '✅' : r.correct === false ? '❌' : '⏳'}
-                            </span>
-                          </>
-                        ) : (
-                          <span className="text-[9px] text-muted-foreground">no prediction</span>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ═══ PROBABILITY MODEL ═══ */}
       <div className="px-3 py-2 border-b border-border/30">

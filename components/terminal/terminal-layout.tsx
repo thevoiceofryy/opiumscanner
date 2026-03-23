@@ -28,7 +28,8 @@ export function TerminalLayout() {
   const btcPrice = useBTCPrice()
   const { chainlinkLive } = useTargetPriceWebSocket()
 const {
-    priceToBeat, probability, marketTitle,
+  priceToBeat, probability, marketTitle,
+currentPrice, diffPct, bias,
     clobAskYes, clobAskNo, bookDepth, lastResult,
 upRounds, downRounds, correctRounds, wrongRounds, resultsLog
   } = usePolymarketRound()
@@ -48,13 +49,41 @@ upRounds, downRounds, correctRounds, wrongRounds, resultsLog
   const noPrice  = clobAskNo  ?? null
 
   return (
-    <div className="h-screen flex flex-col bg-background overflow-hidden">
+<div className="flex flex-col h-full min-h-0 bg-background overflow-hidden">
       <TerminalHeader />
       <AnnouncementBanner />
+<div className="px-3 py-2 border-b border-border text-xs font-mono flex gap-4 overflow-hidden">
 
-      <div className="flex-1 flex flex-col md:grid md:grid-cols-12 gap-0.5 bg-border p-0.5 overflow-y-auto md:overflow-hidden">
+  <div>
+    <span className="text-gray-400">PTB:</span>{' '}
+    <span>${priceToBeat?.toFixed(2)}</span>
+  </div>
 
-        {/* ── LEFT SIDEBAR ─────────────────────────────────────────────────── */}
+  <div>
+    <span className="text-gray-400">BTC:</span>{' '}
+    <span>${currentPrice?.toFixed(2)}</span>
+  </div>
+
+  <div>
+    <span className="text-gray-400">Δ:</span>{' '}
+    <span>{diffPct.toFixed(2)}%</span>
+  </div>
+
+  <div>
+    <span className="text-gray-400">BIAS:</span>{' '}
+    <span className={
+      bias === 'UP'
+        ? 'text-green-400'
+        : bias === 'DOWN'
+        ? 'text-red-400'
+        : 'text-gray-400'
+    }>
+      {bias}
+    </span>
+  </div>
+
+</div>
+<div className="flex-1 flex flex-col md:grid md:grid-cols-12 gap-0.5 bg-border p-0.5 overflow-hidden min-h-0">        {/* ── LEFT SIDEBAR ─────────────────────────────────────────────────── */}
         <div className="col-span-12 md:col-span-2 bg-card flex flex-col overflow-hidden min-h-[400px] md:min-h-0">
           <div className="px-3 py-2 border-b border-border flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -66,7 +95,7 @@ upRounds, downRounds, correctRounds, wrongRounds, resultsLog
               <span className="text-xs font-mono">{selected.label}</span>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto min-h-0">
+<div className="flex-1 overflow-hidden min-h-0">
             <FlowPanel
               cryptoData={cryptoData || null}
               fundingData={fundingData || null}
@@ -151,25 +180,27 @@ upRounds, downRounds, correctRounds, wrongRounds, resultsLog
         {/* ── RIGHT PANEL ──────────────────────────────────────────────────── */}
         <div className="col-span-12 md:col-span-3 bg-card flex flex-col overflow-hidden min-h-[500px] md:min-h-0">
           <div className="flex-shrink-0 border-b border-border">
-            <SignalPanel
-              cryptoData={cryptoData || null}
-              marketPrices={{
-                yes: probability ?? 0,
-                no: (probability !== null && probability !== undefined) ? 100 - probability : 0,
-              }}
-              selectedMarket={marketTitle || 'Searching for BTC Market...'}
-              priceToBeat={priceToBeat || 0}
-              btcPrice={chainlinkLive || btcPrice || 0}
-              clobAskYes={clobAskYes}
-              clobAskNo={clobAskNo}
-              bookDepth={bookDepth}
-              lastResult={lastResult}
-              upRounds={upRounds}
-              downRounds={downRounds}
-              correctRounds={correctRounds}
-              wrongRounds={wrongRounds}
-              resultsLog={resultsLog}
-            />
+<SignalPanel
+  cryptoData={cryptoData || null}
+  marketPrices={{
+yes: yesPrice ? yesPrice * 100 : 0,
+    no: (probability !== null && probability !== undefined) ? 100 - probability : 0,
+  }}
+  selectedMarket={marketTitle || 'Searching for BTC Market...'}
+  priceToBeat={priceToBeat || 0}
+  btcPrice={chainlinkLive || btcPrice || 0}
+  bias={bias}
+  diffPct={diffPct}
+  clobAskYes={clobAskYes}
+  clobAskNo={clobAskNo}
+  bookDepth={bookDepth}
+  lastResult={lastResult}
+  upRounds={upRounds}
+  downRounds={downRounds}
+  correctRounds={correctRounds}
+  wrongRounds={wrongRounds}
+  resultsLog={resultsLog}
+/>
           </div>
           <div className="flex-1 min-h-0 overflow-hidden">
             <ContextPanel />

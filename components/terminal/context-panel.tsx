@@ -83,7 +83,7 @@ export function ContextPanel() {
       </div>
 
       {/* News list */}
-      <div className="flex-1 overflow-y-auto">
+<div className="flex-1 overflow-hidden max-h-full">
         {loading && news.length === 0 && (
           <div className="flex flex-col gap-2 p-3">
             {[1, 2, 3].map((i) => (
@@ -106,7 +106,7 @@ export function ContextPanel() {
           </div>
         )}
         
-        <div className="p-2 space-y-1">
+<div className="p-2 space-y-1 h-full overflow-hidden">
           {news.map((item, idx) => (
             <a 
               key={item.id} 

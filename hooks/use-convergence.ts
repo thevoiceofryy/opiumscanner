@@ -231,19 +231,10 @@ if (absorption > 0.3) {
     // ── FINAL PROBABILITY ─────────────────────────────────────────
     const adjustedZ = zScore + (driftAdjustment / effectiveVol)
 
-    const normalCDF = (x: number): number => {
-      const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741
-      const a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911
-      const sign = x < 0 ? -1 : 1
-      const absX = Math.abs(x)
-      const t = 1.0 / (1.0 + p * absX)
-      const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-absX * absX / 2)
-      return 0.5 * (1.0 + sign * y)
-    }
-
-  let rawProb = 1 / (1 + Math.exp(-adjustedZ * 1.2))
-meanReversionAdj = 0
-    rawProb = Math.max(0.05, Math.min(0.95, rawProb))
+let rawProb = 1 / (1 + Math.exp(-adjustedZ * 1.2))
+meanReversionActive = false          // disable until re-enabled intentionally
+meanReversionDir = null
+rawProb = Math.max(0.05, Math.min(0.95, rawProb))
 
     // ── CONFIDENCE ────────────────────────────────────────────────
     let confidence = 0
@@ -309,8 +300,8 @@ kellyFraction = Math.min(fullKelly * 0.25, 0.08)
   const score = Math.round(Math.abs(finalProb - 0.5) * 200)
 
   let status: ConvergenceStatus = 'WAIT'
-  if (score >= 60) status = 'CONVERGENCE'
-  else if (score >= 35) status = 'STRENGTH'
+if (score >= 30) status = 'CONVERGENCE'
+else if (score >= 15) status = 'STRENGTH'
 
   // Deadband prevents NEUTRAL trap at exactly 0.50
   const direction: 'UP' | 'DOWN' | 'NEUTRAL' =

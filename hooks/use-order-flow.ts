@@ -75,26 +75,21 @@ export function useOrderFlow(): OrderFlowStats {
 
   // ── PASS 2: compute volumes + aggression + absorption ──
   for (const t of trades) {
-    if (t.ts >= cutoff60) {
-      totalVol60 += t.size
+// NEW — fixed
+if (t.ts >= cutoff60) {
+  const weightedSize = t.size > largeTradeThreshold ? t.size * 1.5 : t.size
+  totalVol60 += weightedSize
 
-      let size = t.size
-
-      if (t.size > largeTradeThreshold) {
-        size = t.size * 1.5
-      }
-
-      if (t.side === 'BUY') buyVol60 += size
-      else buyVol60 -= size * 0.5
+  if (t.side === 'BUY') buyVol60 += weightedSize
 
       // 🔥 AGGRESSION + ABSORPTION
       if (prevPrice !== null) {
         if (t.price > prevPrice) {
-          aggressiveBuyVol += size
+          aggressiveBuyVol += weightedSize
         } else if (t.price < prevPrice) {
-          aggressiveSellVol += size
+          aggressiveSellVol += weightedSize
         } else {
-          flatVolume += size
+          flatVolume += weightedSize
         }
       }
 
@@ -119,7 +114,7 @@ export function useOrderFlow(): OrderFlowStats {
 
   return {
     trades,
-    buyVolumeRatio60s: totalVol60 > 0 ? Math.min(1, buyVol60 / totalVol60) : 0.5,
+buyVolumeRatio60s: totalVol60 > 0 ? buyVol60 / totalVol60 : 0.5,
     buyVolumeRatio10s: totalVol10 > 0 ? Math.min(1, buyVol10 / totalVol10) : 0.5,
     totalVolume60s: totalVol60,
     largeTradeThreshold,

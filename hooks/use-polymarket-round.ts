@@ -289,12 +289,30 @@ if (resultRes.ok) {
     }
 
   }, [])
+// ===== PRICE TO BEAT ENGINE =====
+const currentPrice = chainlinkLive || latestBtcPriceRef.current || 0
+
+const diff = currentPrice && priceToBeat
+  ? currentPrice - priceToBeat
+  : 0
+
+const diffPct = currentPrice && priceToBeat
+  ? (diff / priceToBeat) * 100
+  : 0
+
+let bias: 'UP' | 'DOWN' | 'NEUTRAL' = 'NEUTRAL'
+
+if (diffPct > 0.02) bias = 'UP'
+if (diffPct < -0.02) bias = 'DOWN'
 
   return {
 
     marketTitle,
     priceToBeat,
     probability,
+    currentPrice,
+diffPct,
+bias,
 
     clobAskYes,
     clobAskNo,
